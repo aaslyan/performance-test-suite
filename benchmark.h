@@ -1,10 +1,10 @@
 #ifndef BENCHMARK_H
 #define BENCHMARK_H
 
-#include <string>
-#include <vector>
 #include <chrono>
 #include <map>
+#include <string>
+#include <vector>
 
 struct BenchmarkResult {
     std::string name;
