@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "benchmark.h"
+#include "comparison.h"
 #include "cpu_bench.h"
 #include "disk_bench.h"
 #include "integrated_bench.h"
@@ -25,12 +26,20 @@ struct Config {
     std::string report_format = "txt";
     bool verbose = false;
     bool help = false;
+
+    // Comparison mode
+    bool compare_mode = false;
+    std::string baseline_file;
+    std::string current_file;
+    std::string compare_format = "text";
+    double warning_threshold = 10.0;
+    double critical_threshold = 25.0;
 };
 
 void printUsage(const char* program_name)
 {
     std::cout << "Usage: " << program_name << " [OPTIONS]\n"
-              << "\nOptions:\n"
+              << "\nBenchmark Mode Options:\n"
               << "  --modules=LIST      Comma-separated list of modules to run\n"
               << "                      (cpu,mem,disk,net,ipc,integrated,all)\n"
               << "                      Default: all\n"
@@ -39,9 +48,18 @@ void printUsage(const char* program_name)
               << "  --report=FILE       Output report file (default: stdout)\n"
               << "  --format=FORMAT     Report format: txt, json, or markdown (default: txt)\n"
               << "  --verbose           Enable verbose output\n"
+              << "\nComparison Mode Options:\n"
+              << "  --compare           Enable comparison mode\n"
+              << "  --baseline=FILE     Baseline JSON report file\n"
+              << "  --current=FILE      Current JSON report file\n"
+              << "  --compare-format=FORMAT  Comparison format: text or markdown (default: text)\n"
+              << "  --warning=PCT       Warning threshold percentage (default: 10.0)\n"
+              << "  --critical=PCT      Critical threshold percentage (default: 25.0)\n"
+              << "\nGeneral Options:\n"
               << "  --help              Show this help message\n"
-              << "\nExample:\n"
-              << "  " << program_name << " --modules=cpu --duration=60 --report=results.json\n"
+              << "\nExamples:\n"
+              << "  Benchmark: " << program_name << " --modules=cpu --duration=60 --report=results.json\n"
+              << "  Compare:   " << program_name << " --compare --baseline=old.json --current=new.json\n"
               << std::endl;
 }
 
@@ -72,13 +90,19 @@ Config parseArguments(int argc, char* argv[])
         { "format", required_argument, nullptr, 'f' },
         { "verbose", no_argument, nullptr, 'v' },
         { "help", no_argument, nullptr, 'h' },
+        { "compare", no_argument, nullptr, 'c' },
+        { "baseline", required_argument, nullptr, 'b' },
+        { "current", required_argument, nullptr, 'n' },
+        { "compare-format", required_argument, nullptr, 'F' },
+        { "warning", required_argument, nullptr, 'w' },
+        { "critical", required_argument, nullptr, 'C' },
         { nullptr, 0, nullptr, 0 }
     };
 
     int opt;
     int option_index = 0;
 
-    while ((opt = getopt_long(argc, argv, "m:d:i:r:f:vh", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "m:d:i:r:f:vhcb:n:F:w:C:", long_options, &option_index)) != -1) {
         switch (opt) {
         case 'm':
             config.modules = splitString(optarg, ',');
@@ -113,6 +137,36 @@ Config parseArguments(int argc, char* argv[])
         case 'h':
             config.help = true;
             return config;
+        case 'c':
+            config.compare_mode = true;
+            break;
+        case 'b':
+            config.baseline_file = optarg;
+            break;
+        case 'n':
+            config.current_file = optarg;
+            break;
+        case 'F':
+            config.compare_format = optarg;
+            if (config.compare_format != "text" && config.compare_format != "markdown") {
+                std::cerr << "Compare format must be 'text' or 'markdown'\n";
+                exit(1);
+            }
+            break;
+        case 'w':
+            config.warning_threshold = std::stod(optarg);
+            if (config.warning_threshold < 0) {
+                std::cerr << "Warning threshold must be non-negative\n";
+                exit(1);
+            }
+            break;
+        case 'C':
+            config.critical_threshold = std::stod(optarg);
+            if (config.critical_threshold < 0) {
+                std::cerr << "Critical threshold must be non-negative\n";
+                exit(1);
+            }
+            break;
         default:
             printUsage(argv[0]);
             exit(1);
@@ -163,6 +217,35 @@ int main(int argc, char* argv[])
     if (config.help) {
         printUsage(argv[0]);
         return 0;
+    }
+
+    // Handle comparison mode
+    if (config.compare_mode) {
+        if (config.baseline_file.empty() || config.current_file.empty()) {
+            std::cerr << "Error: Both --baseline and --current files are required for comparison mode\n";
+            return 1;
+        }
+
+        ComparisonEngine engine;
+        engine.setThresholds(config.warning_threshold, config.critical_threshold);
+
+        if (!engine.loadBaselineReport(config.baseline_file)) {
+            std::cerr << "Error: Failed to load baseline report: " << config.baseline_file << std::endl;
+            return 1;
+        }
+
+        if (!engine.loadCurrentReport(config.current_file)) {
+            std::cerr << "Error: Failed to load current report: " << config.current_file << std::endl;
+            return 1;
+        }
+
+        std::string report = engine.generateReport(config.compare_format);
+        std::cout << report;
+
+        // Exit with appropriate code based on health status
+        auto health = engine.getOverallHealth();
+        return (health == ComparisonEngine::CRITICAL) ? 2 : (health == ComparisonEngine::WARNING) ? 1
+                                                                                                  : 0;
     }
 
     std::cout << "Performance Test Suite v1.0\n";

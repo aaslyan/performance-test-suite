@@ -49,6 +49,7 @@ set(SOURCES
     ipc_bench.cpp
     integrated_bench.cpp
     report.cpp
+    comparison.cpp
 )
 
 # Headers (for IDE support)
@@ -61,6 +62,7 @@ set(HEADERS
     ipc_bench.h
     integrated_bench.h
     report.h
+    comparison.h
     utils.h
 )
 

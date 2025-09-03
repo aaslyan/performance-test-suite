@@ -43,7 +43,7 @@ IPCBenchmark::SharedMemorySegment IPCBenchmark::createSharedMemory()
     }
 
     memset(segment.shm_ptr, 0, SHM_SIZE);
-    
+
     // Initialize shared control block
     SharedControlBlock* control = static_cast<SharedControlBlock*>(segment.shm_ptr);
     control->should_stop = false;

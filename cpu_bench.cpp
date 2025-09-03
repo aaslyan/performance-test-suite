@@ -8,7 +8,7 @@ void CPUBenchmark::runSingleThread(int thread_id)
 {
     // Pin thread to specific CPU core for consistent performance
     bool affinity_set = CPUAffinity::pinThreadToCore(thread_id % CPUAffinity::getNumCores());
-    
+
     std::mt19937 gen(thread_id);
     std::uniform_real_distribution<> dis(0.0, 1000.0);
 

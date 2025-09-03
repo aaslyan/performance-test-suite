@@ -175,7 +175,7 @@ BenchmarkResult MemoryBenchmark::run(int duration_seconds, int iterations, bool 
             threads.emplace_back([&, i]() {
                 // Pin thread to CPU core for consistent memory performance
                 CPUAffinity::pinThreadToCore(i % CPUAffinity::getNumCores());
-                
+
                 size_t thread_offset = (buffer_size / num_threads) * i;
                 char* thread_buffer = static_cast<char*>(buffer) + thread_offset;
                 size_t thread_size = buffer_size / num_threads;

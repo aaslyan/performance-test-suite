@@ -18,8 +18,8 @@
 #include <pthread.h>
 #include <sys/sysctl.h>
 #elif defined(__linux__)
-#include <sched.h>
 #include <pthread.h>
+#include <sched.h>
 #include <unistd.h>
 #endif
 
@@ -195,7 +195,7 @@ public:
         cpu_set_t cpuset;
         CPU_ZERO(&cpuset);
         CPU_SET(core_id, &cpuset);
-        
+
         int result = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
         return result == 0;
 
@@ -208,11 +208,11 @@ public:
     static std::vector<int> getCurrentAffinity()
     {
         std::vector<int> cores;
-        
+
 #ifdef __linux__
         cpu_set_t cpuset;
         CPU_ZERO(&cpuset);
-        
+
         if (pthread_getaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0) {
             for (int i = 0; i < getNumCores(); ++i) {
                 if (CPU_ISSET(i, &cpuset)) {

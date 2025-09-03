@@ -23,7 +23,7 @@ private:
         std::string prod_sem_name;
         std::string cons_sem_name;
     };
-    
+
     // Control structure in shared memory for process synchronization
     struct SharedControlBlock {
         volatile bool should_stop;

@@ -9,14 +9,16 @@
 
 // Compatibility helper for older C++ standards
 namespace compat {
-    inline bool file_exists(const std::string& path) {
-        struct stat buffer;
-        return (stat(path.c_str(), &buffer) == 0);
-    }
-    
-    inline bool remove_file(const std::string& path) {
-        return (unlink(path.c_str()) == 0);
-    }
+inline bool file_exists(const std::string& path)
+{
+    struct stat buffer;
+    return (stat(path.c_str(), &buffer) == 0);
+}
+
+inline bool remove_file(const std::string& path)
+{
+    return (unlink(path.c_str()) == 0);
+}
 }
 
 DiskBenchmark::DiskBenchmark()
