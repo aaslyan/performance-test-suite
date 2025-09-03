@@ -3,7 +3,6 @@
 
 #include "benchmark.h"
 #include "utils.h"
-#include <filesystem>
 #include <string>
 
 class DiskBenchmark : public Benchmark {

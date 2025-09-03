@@ -7,6 +7,18 @@
 #include <sys/statvfs.h>
 #include <unistd.h>
 
+// Compatibility helper for older C++ standards
+namespace compat {
+    inline bool file_exists(const std::string& path) {
+        struct stat buffer;
+        return (stat(path.c_str(), &buffer) == 0);
+    }
+    
+    inline bool remove_file(const std::string& path) {
+        return (unlink(path.c_str()) == 0);
+    }
+}
+
 DiskBenchmark::DiskBenchmark()
 {
     char temp_template[] = "/tmp/perf_test_XXXXXX";
@@ -26,8 +38,8 @@ DiskBenchmark::~DiskBenchmark()
 
 void DiskBenchmark::cleanup()
 {
-    if (!test_file_path.empty() && std::filesystem::exists(test_file_path)) {
-        std::filesystem::remove(test_file_path);
+    if (!test_file_path.empty() && compat::file_exists(test_file_path)) {
+        compat::remove_file(test_file_path);
     }
 }
 

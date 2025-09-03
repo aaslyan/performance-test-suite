@@ -1,12 +1,33 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 2.8)
 project(PerfTest)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+# Set C++ standard (try C++17, fallback to C++14, then C++11)
+if(CMAKE_VERSION VERSION_LESS "3.1")
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # Try C++17, fallback to C++14, then C++11
+        execute_process(COMMAND ${CMAKE_CXX_COMPILER} -dumpversion OUTPUT_VARIABLE GCC_VERSION)
+        if(GCC_VERSION VERSION_GREATER "7.0")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
+        elseif(GCC_VERSION VERSION_GREATER "4.9")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
+        else()
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+        endif()
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
+    else()
+        # Generic fallback
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+    endif()
+else()
+    # Modern CMake
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_CXX_EXTENSIONS OFF)
+endif()
 
 # Add compile options
-add_compile_options(-Wall -Wextra -O3)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -O3")
 
 # Find required packages
 find_package(Threads REQUIRED)
@@ -23,7 +44,7 @@ set(SOURCES
     report.cpp
 )
 
-# Headers
+# Headers (for IDE support)
 set(HEADERS
     benchmark.h
     cpu_bench.h
@@ -39,10 +60,8 @@ set(HEADERS
 # Create executable
 add_executable(perf_test ${SOURCES})
 
-# Link libraries
-target_link_libraries(perf_test 
-    Threads::Threads
-)
+# Link libraries (CMake 2.8 compatible)
+target_link_libraries(perf_test ${CMAKE_THREAD_LIBS_INIT})
 
 # Link rt library only on Linux (for shared memory)
 if(UNIX AND NOT APPLE)
