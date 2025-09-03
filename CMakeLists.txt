@@ -29,6 +29,15 @@ endif()
 # Add compile options
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -O3")
 
+# Add linker flags for better compatibility (Linux only)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # GCC-specific flags for Linux only
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--as-needed")
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Clang-specific flags for Linux only
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--as-needed")
+endif()
+
 # Find required packages
 find_package(Threads)
 
@@ -65,7 +74,21 @@ set(HEADERS
 # Create executable
 add_executable(perf_test ${SOURCES})
 
-# Link libraries (CMake 2.8 compatible with multiple fallbacks)
+# Link libraries in correct order (important for static linking)
+# Math library first
+target_link_libraries(perf_test m)
+
+# RT library for Linux (shared memory/IPC)
+if(UNIX AND NOT APPLE)
+    find_library(RT_LIB rt)
+    if(RT_LIB)
+        target_link_libraries(perf_test ${RT_LIB})
+    else()
+        target_link_libraries(perf_test rt)
+    endif()
+endif()
+
+# Pthread library (CMake 2.8 compatible with multiple fallbacks)
 if(CMAKE_THREAD_LIBS_INIT)
     target_link_libraries(perf_test ${CMAKE_THREAD_LIBS_INIT})
 else()
@@ -82,10 +105,11 @@ else()
     endif()
 endif()
 
-# Link rt library only on Linux (for shared memory)
+# Additional system libraries that might be needed on some Linux systems
 if(UNIX AND NOT APPLE)
-    target_link_libraries(perf_test rt)
+    # Some systems need dl for dynamic linking
+    find_library(DL_LIB dl)
+    if(DL_LIB)
+        target_link_libraries(perf_test ${DL_LIB})
+    endif()
 endif()
-
-# Add math library
-target_link_libraries(perf_test m)
