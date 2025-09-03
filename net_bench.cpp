@@ -16,6 +16,10 @@ void NetworkBenchmark::tcpServer(int port, LatencyStats& stats)
     int opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
+    // Make server socket non-blocking to avoid hanging on accept
+    int flags = fcntl(server_fd, F_GETFL, 0);
+    fcntl(server_fd, F_SETFL, flags | O_NONBLOCK);
+
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -55,6 +59,9 @@ void NetworkBenchmark::tcpServer(int port, LatencyStats& stats)
             }
 
             close(client_fd);
+        } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            // Only break on real errors, not when no connection is available
+            break;
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
