@@ -41,6 +41,12 @@ endif()
 # Find required packages
 find_package(Threads)
 
+# Debug output for CMake 2.8.12.2 pthread issues
+message(STATUS "CMake version: ${CMAKE_VERSION}")
+message(STATUS "CMAKE_THREAD_LIBS_INIT: '${CMAKE_THREAD_LIBS_INIT}'")
+message(STATUS "CMAKE_USE_PTHREADS_INIT: ${CMAKE_USE_PTHREADS_INIT}")
+message(STATUS "CMAKE_HAVE_THREADS_LIBRARY: ${CMAKE_HAVE_THREADS_LIBRARY}")
+
 # Handle pthread linking for older systems
 if(CMAKE_USE_PTHREADS_INIT)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
@@ -90,15 +96,33 @@ endif()
 
 # Pthread library (CMake 2.8 compatible with multiple fallbacks)
 if(CMAKE_THREAD_LIBS_INIT)
-    target_link_libraries(perf_test ${CMAKE_THREAD_LIBS_INIT})
+    message(STATUS "Original CMAKE_THREAD_LIBS_INIT: '${CMAKE_THREAD_LIBS_INIT}'")
+    
+    # Fix common CMake 2.8.x bugs with pthread library names
+    set(FIXED_THREAD_LIBS "${CMAKE_THREAD_LIBS_INIT}")
+    string(REPLACE "-lpthreads" "-lpthread" FIXED_THREAD_LIBS "${FIXED_THREAD_LIBS}")
+    string(REPLACE "pthreads" "pthread" FIXED_THREAD_LIBS "${FIXED_THREAD_LIBS}")
+    
+    message(STATUS "Fixed pthread libs: '${FIXED_THREAD_LIBS}'")
+    
+    # Check if the fixed version is different and warn user
+    if(NOT "${CMAKE_THREAD_LIBS_INIT}" STREQUAL "${FIXED_THREAD_LIBS}")
+        message(STATUS "Applied CMake 2.8.x pthread library name fix")
+    endif()
+    
+    target_link_libraries(perf_test ${FIXED_THREAD_LIBS})
 else()
+    message(STATUS "CMAKE_THREAD_LIBS_INIT is empty, using fallback methods")
+    
     # Fallback approaches for systems where find_package(Threads) fails
     if(UNIX)
         # Try pthread library directly
         find_library(PTHREAD_LIB pthread)
         if(PTHREAD_LIB)
+            message(STATUS "Found pthread library: ${PTHREAD_LIB}")
             target_link_libraries(perf_test ${PTHREAD_LIB})
         else()
+            message(STATUS "Using direct pthread linking as last resort")
             # Last resort - link pthread by name
             target_link_libraries(perf_test pthread)
         endif()
