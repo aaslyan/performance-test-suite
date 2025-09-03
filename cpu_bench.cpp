@@ -176,7 +176,8 @@ BenchmarkResult CPUBenchmark::run(int duration_seconds, int iterations, bool ver
             t.join();
         }
 
-        double elapsed_seconds = benchmark_timer.elapsedSeconds();
+        double elapsed_nanoseconds = benchmark_timer.elapsedNanoseconds();
+        double elapsed_seconds = elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
 
         uint64_t total = total_ops.load();
         result.throughput = total / elapsed_seconds / 1e9; // GOPS

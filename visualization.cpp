@@ -255,7 +255,7 @@ std::string ASCIIChart::generateComparisonChart(
 
         double change = ((current.value - baseline.value) / baseline.value) * 100.0;
         std::string change_str = (change >= 0 ? "+" : "") + formatValue(change, "%", 1);
-        
+
         std::string color = getColorCode(current.status, config.use_colors);
         std::string reset = config.use_colors ? "\033[0m" : "";
 
@@ -317,12 +317,20 @@ std::string ComparisonVisualizer::generateComparisonCharts(
             current.label = label;
             current.value = metric.current_value;
             current.unit = metric.unit;
-            
+
             switch (metric.status) {
-                case MetricComparison::IMPROVED: current.status = "IMPROVED"; break;
-                case MetricComparison::UNCHANGED: current.status = "UNCHANGED"; break;
-                case MetricComparison::DEGRADED: current.status = "DEGRADED"; break;
-                case MetricComparison::CRITICAL: current.status = "CRITICAL"; break;
+            case MetricComparison::IMPROVED:
+                current.status = "IMPROVED";
+                break;
+            case MetricComparison::UNCHANGED:
+                current.status = "UNCHANGED";
+                break;
+            case MetricComparison::DEGRADED:
+                current.status = "DEGRADED";
+                break;
+            case MetricComparison::CRITICAL:
+                current.status = "CRITICAL";
+                break;
             }
 
             comparison_data.push_back({ baseline, current });
@@ -350,12 +358,20 @@ std::string ComparisonVisualizer::generateMetricChart(
         current_point.label = "Current";
         current_point.value = metric.current_value;
         current_point.unit = metric.unit;
-        
+
         switch (metric.status) {
-            case MetricComparison::IMPROVED: current_point.status = "IMPROVED"; break;
-            case MetricComparison::UNCHANGED: current_point.status = "UNCHANGED"; break;
-            case MetricComparison::DEGRADED: current_point.status = "DEGRADED"; break;
-            case MetricComparison::CRITICAL: current_point.status = "CRITICAL"; break;
+        case MetricComparison::IMPROVED:
+            current_point.status = "IMPROVED";
+            break;
+        case MetricComparison::UNCHANGED:
+            current_point.status = "UNCHANGED";
+            break;
+        case MetricComparison::DEGRADED:
+            current_point.status = "DEGRADED";
+            break;
+        case MetricComparison::CRITICAL:
+            current_point.status = "CRITICAL";
+            break;
         }
         data.push_back(current_point);
 

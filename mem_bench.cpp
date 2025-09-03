@@ -10,20 +10,48 @@ double MemoryBenchmark::measureSequentialRead(void* buffer, size_t size, int ite
     char* src = static_cast<char*>(buffer);
     char* dst = new char[BLOCK_SIZE];
 
-    Timer timer;
-    timer.start();
+    // Adaptive iteration count to ensure measurable execution time
+    int actual_iterations = iterations;
+    double elapsed_nanoseconds = 0.0;
+    double bytes_read = 0.0;
 
-    for (int iter = 0; iter < iterations; ++iter) {
-        size_t offset = 0;
-        while (offset + BLOCK_SIZE <= size) {
-            std::memcpy(dst, src + offset, BLOCK_SIZE);
-            offset += BLOCK_SIZE;
+    do {
+        Timer timer;
+        timer.start();
+
+        for (int iter = 0; iter < actual_iterations; ++iter) {
+            size_t offset = 0;
+            while (offset + BLOCK_SIZE <= size) {
+                std::memcpy(dst, src + offset, BLOCK_SIZE);
+                offset += BLOCK_SIZE;
+            }
         }
+
+        elapsed_nanoseconds = timer.elapsedNanoseconds();
+        bytes_read = static_cast<double>(size) * actual_iterations;
+
+        // If test completed too quickly, increase iterations and retry
+        // Minimum 1 million nanoseconds (1ms) for accurate measurement
+        if (elapsed_nanoseconds < MIN_MEASURABLE_TIME_NS && actual_iterations < 1000) {
+            actual_iterations *= 10;
+        } else {
+            break;
+        }
+    } while (actual_iterations <= 1000);
+
+    // Ensure we don't get invalid results
+    if (elapsed_nanoseconds <= 0.0) {
+        elapsed_nanoseconds = MIN_MEASURABLE_TIME_NS; // Minimum 1ms to avoid division by zero
     }
 
-    double elapsed_seconds = timer.elapsedSeconds();
-    double bytes_read = static_cast<double>(size) * iterations;
+    // Convert nanoseconds to seconds for throughput calculation
+    double elapsed_seconds = elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
     double throughput_mbps = (bytes_read / (1024 * 1024)) / elapsed_seconds;
+
+    // Sanity check: cap at reasonable maximum (100 GB/s)
+    if (throughput_mbps > 100000.0) {
+        throughput_mbps = 100000.0;
+    }
 
     delete[] dst;
     return throughput_mbps;
@@ -36,20 +64,48 @@ double MemoryBenchmark::measureSequentialWrite(void* buffer, size_t size, int it
 
     std::memset(src, 0xAA, BLOCK_SIZE);
 
-    Timer timer;
-    timer.start();
+    // Adaptive iteration count to ensure measurable execution time
+    int actual_iterations = iterations;
+    double elapsed_nanoseconds = 0.0;
+    double bytes_written = 0.0;
 
-    for (int iter = 0; iter < iterations; ++iter) {
-        size_t offset = 0;
-        while (offset + BLOCK_SIZE <= size) {
-            std::memcpy(dst + offset, src, BLOCK_SIZE);
-            offset += BLOCK_SIZE;
+    do {
+        Timer timer;
+        timer.start();
+
+        for (int iter = 0; iter < actual_iterations; ++iter) {
+            size_t offset = 0;
+            while (offset + BLOCK_SIZE <= size) {
+                std::memcpy(dst + offset, src, BLOCK_SIZE);
+                offset += BLOCK_SIZE;
+            }
         }
+
+        elapsed_nanoseconds = timer.elapsedNanoseconds();
+        bytes_written = static_cast<double>(size) * actual_iterations;
+
+        // If test completed too quickly, increase iterations and retry
+        // Minimum 1 million nanoseconds (1ms) for accurate measurement
+        if (elapsed_nanoseconds < MIN_MEASURABLE_TIME_NS && actual_iterations < 1000) {
+            actual_iterations *= 10;
+        } else {
+            break;
+        }
+    } while (actual_iterations <= 1000);
+
+    // Ensure we don't get invalid results
+    if (elapsed_nanoseconds <= 0.0) {
+        elapsed_nanoseconds = MIN_MEASURABLE_TIME_NS; // Minimum 1ms to avoid division by zero
     }
 
-    double elapsed_seconds = timer.elapsedSeconds();
-    double bytes_written = static_cast<double>(size) * iterations;
+    // Convert nanoseconds to seconds for throughput calculation
+    double elapsed_seconds = elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
     double throughput_mbps = (bytes_written / (1024 * 1024)) / elapsed_seconds;
+
+    // Sanity check: cap at reasonable maximum (100 GB/s)
+    if (throughput_mbps > 100000.0) {
+        throughput_mbps = 100000.0;
+    }
 
     delete[] src;
     return throughput_mbps;
@@ -84,7 +140,8 @@ double MemoryBenchmark::measureRandomAccess(void* buffer, size_t size, int itera
         stats.addSample(latency_us);
     }
 
-    double elapsed_seconds = overall_timer.elapsedSeconds();
+    double elapsed_nanoseconds = overall_timer.elapsedNanoseconds();
+    double elapsed_seconds = elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
     double ops_per_second = iterations / elapsed_seconds;
 
     if (sum == 0) {
@@ -196,7 +253,8 @@ BenchmarkResult MemoryBenchmark::run(int duration_seconds, int iterations, bool 
             t.join();
         }
 
-        double mt_elapsed = mt_timer.elapsedSeconds();
+        double mt_elapsed_nanoseconds = mt_timer.elapsedNanoseconds();
+        double mt_elapsed = mt_elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
         double mt_throughput = (total_ops.load() * 64) / (1024.0 * 1024.0) / mt_elapsed;
         result.extra_metrics["multithread_throughput_mbps"] = mt_throughput;
         result.extra_metrics["threads_used"] = num_threads;

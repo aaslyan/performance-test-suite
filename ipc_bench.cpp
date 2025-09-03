@@ -175,7 +175,8 @@ double IPCBenchmark::measureThroughput(size_t message_size, int duration_seconds
             int status;
             waitpid(child_pid, &status, 0);
 
-            double elapsed_seconds = benchmark_timer.elapsedSeconds();
+            double elapsed_nanoseconds = benchmark_timer.elapsedNanoseconds();
+            double elapsed_seconds = elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
             double throughput_mbps = (control->bytes_transferred / (1024.0 * 1024.0)) / elapsed_seconds;
 
             destroySharedMemory(segment);

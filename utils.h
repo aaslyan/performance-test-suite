@@ -12,6 +12,13 @@
 #include <string>
 #include <vector>
 
+// Time conversion constants for consistent nanosecond-based timing
+static constexpr double NANOSECONDS_PER_SECOND = 1000000000.0;
+static constexpr double NANOSECONDS_PER_MILLISECOND = 1000000.0;
+static constexpr double MICROSECONDS_PER_SECOND = 1000000.0;
+static constexpr double MILLISECONDS_PER_SECOND = 1000.0;
+static constexpr double MIN_MEASURABLE_TIME_NS = 1000000.0; // 1ms minimum for reliable measurements
+
 #ifdef __APPLE__
 #include <mach/mach.h>
 #include <mach/thread_policy.h>

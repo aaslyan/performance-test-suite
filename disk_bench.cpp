@@ -78,7 +78,8 @@ double DiskBenchmark::measureSequentialWrite(const std::string& path, size_t siz
     file.flush();
     file.close();
 
-    double elapsed_seconds = overall_timer.elapsedSeconds();
+    double elapsed_nanoseconds = overall_timer.elapsedNanoseconds();
+    double elapsed_seconds = elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
     double throughput_mbps = (bytes_written / (1024.0 * 1024.0)) / elapsed_seconds;
 
     return throughput_mbps;
@@ -112,7 +113,8 @@ double DiskBenchmark::measureSequentialRead(const std::string& path, size_t size
 
     file.close();
 
-    double elapsed_seconds = overall_timer.elapsedSeconds();
+    double elapsed_nanoseconds = overall_timer.elapsedNanoseconds();
+    double elapsed_seconds = elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
     double throughput_mbps = (bytes_read / (1024.0 * 1024.0)) / elapsed_seconds;
 
     return throughput_mbps;
@@ -153,7 +155,8 @@ double DiskBenchmark::measureRandomWrite(const std::string& path, size_t size, i
 
     close(fd);
 
-    double elapsed_seconds = overall_timer.elapsedSeconds();
+    double elapsed_nanoseconds = overall_timer.elapsedNanoseconds();
+    double elapsed_seconds = elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
     double iops = ops / elapsed_seconds;
 
     return iops;
@@ -187,7 +190,8 @@ double DiskBenchmark::measureRandomRead(const std::string& path, size_t size, in
 
     close(fd);
 
-    double elapsed_seconds = overall_timer.elapsedSeconds();
+    double elapsed_nanoseconds = overall_timer.elapsedNanoseconds();
+    double elapsed_seconds = elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
     double iops = ops / elapsed_seconds;
 
     return iops;

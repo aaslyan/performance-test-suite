@@ -90,7 +90,7 @@ public:
 
     // Generate comparison report
     std::string generateReport(const std::string& format = "text");
-    
+
     // Generate report with ASCII charts
     std::string generateReportWithCharts(const std::string& format = "text");
 

@@ -99,7 +99,8 @@ IntegratedBenchmark::WorkflowMetrics IntegratedBenchmark::runNetworkToMemoryWork
     server_thread.join();
     client_thread.join();
 
-    double elapsed = overall_timer.elapsedSeconds();
+    double elapsed_nanoseconds = overall_timer.elapsedNanoseconds();
+    double elapsed = elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
     uint64_t ops = total_operations.load();
 
     metrics.throughput_ops_sec = ops / elapsed;
@@ -177,7 +178,8 @@ IntegratedBenchmark::WorkflowMetrics IntegratedBenchmark::runMemoryToDiskWorkflo
     generator_thread.join();
     writer_thread.join();
 
-    double elapsed = overall_timer.elapsedSeconds();
+    double elapsed_nanoseconds = overall_timer.elapsedNanoseconds();
+    double elapsed = elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
     uint64_t total_bytes = bytes_written.load();
 
     metrics.throughput_ops_sec = (total_bytes / 4096.0) / elapsed;
@@ -261,7 +263,8 @@ IntegratedBenchmark::WorkflowMetrics IntegratedBenchmark::runFullPipeline(int du
     cpu_thread.join();
     output_thread.join();
 
-    double elapsed = overall_timer.elapsedSeconds();
+    double elapsed_nanoseconds = overall_timer.elapsedNanoseconds();
+    double elapsed = elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
     uint64_t ops = total_operations.load();
 
     metrics.throughput_ops_sec = ops / elapsed;
