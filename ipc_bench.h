@@ -23,12 +23,18 @@ private:
         std::string prod_sem_name;
         std::string cons_sem_name;
     };
+    
+    // Control structure in shared memory for process synchronization
+    struct SharedControlBlock {
+        volatile bool should_stop;
+        volatile uint64_t bytes_transferred;
+        char padding[64 - sizeof(bool) - sizeof(uint64_t)]; // Align to cache line
+        char data[]; // Variable size data follows
+    };
 
     double measureThroughput(size_t message_size, int duration_seconds, LatencyStats& stats);
-    void producer(SharedMemorySegment& segment, size_t message_size,
-        std::atomic<bool>& should_stop, std::atomic<uint64_t>& bytes_transferred);
-    void consumer(SharedMemorySegment& segment, size_t message_size,
-        std::atomic<bool>& should_stop, LatencyStats& stats);
+    void producer(SharedMemorySegment& segment, size_t message_size);
+    void consumer(SharedMemorySegment& segment, size_t message_size, LatencyStats& stats);
 
     SharedMemorySegment createSharedMemory();
     void destroySharedMemory(SharedMemorySegment& segment);

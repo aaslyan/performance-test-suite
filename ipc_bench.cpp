@@ -1,6 +1,7 @@
 #include "ipc_bench.h"
 #include <chrono>
 #include <cstring>
+#include <errno.h>
 #include <iostream>
 #include <random>
 #include <sys/wait.h>
@@ -12,15 +13,19 @@ IPCBenchmark::SharedMemorySegment IPCBenchmark::createSharedMemory()
 
     pid_t pid = getpid();
     auto now = std::chrono::high_resolution_clock::now();
-    auto timestamp = now.time_since_epoch().count();
+    auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 10000;
 
-    segment.shm_name = "/perf_test_shm_" + std::to_string(pid) + "_" + std::to_string(timestamp);
-    segment.prod_sem_name = "/perf_test_prod_sem_" + std::to_string(pid) + "_" + std::to_string(timestamp);
-    segment.cons_sem_name = "/perf_test_cons_sem_" + std::to_string(pid) + "_" + std::to_string(timestamp);
+    // Use shorter names for macOS compatibility (NAME_MAX is often 31 chars)
+    segment.shm_name = "/pf_shm_" + std::to_string(pid % 10000) + "_" + std::to_string(timestamp);
+    segment.prod_sem_name = "/pf_prod_" + std::to_string(pid % 10000) + "_" + std::to_string(timestamp);
+    segment.cons_sem_name = "/pf_cons_" + std::to_string(pid % 10000) + "_" + std::to_string(timestamp);
 
     int shm_fd = shm_open(segment.shm_name.c_str(), O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1) {
-        throw std::runtime_error("Failed to create shared memory");
+        std::string error_msg = "Failed to create shared memory: ";
+        error_msg += strerror(errno);
+        error_msg += " (name: " + segment.shm_name + ")";
+        throw std::runtime_error(error_msg);
     }
 
     if (ftruncate(shm_fd, SHM_SIZE) == -1) {
@@ -38,6 +43,11 @@ IPCBenchmark::SharedMemorySegment IPCBenchmark::createSharedMemory()
     }
 
     memset(segment.shm_ptr, 0, SHM_SIZE);
+    
+    // Initialize shared control block
+    SharedControlBlock* control = static_cast<SharedControlBlock*>(segment.shm_ptr);
+    control->should_stop = false;
+    control->bytes_transferred = 0;
 
     sem_unlink(segment.prod_sem_name.c_str());
     sem_unlink(segment.cons_sem_name.c_str());
@@ -76,22 +86,22 @@ void IPCBenchmark::destroySharedMemory(SharedMemorySegment& segment)
     segment.consumer_sem = nullptr;
 }
 
-void IPCBenchmark::producer(SharedMemorySegment& segment, size_t message_size,
-    std::atomic<bool>& should_stop, std::atomic<uint64_t>& bytes_transferred)
+void IPCBenchmark::producer(SharedMemorySegment& segment, size_t message_size)
 {
-    char* buffer = static_cast<char*>(segment.shm_ptr);
+    SharedControlBlock* control = static_cast<SharedControlBlock*>(segment.shm_ptr);
+    char* buffer = control->data;
     std::vector<char> message(message_size, 'P');
 
     for (size_t i = 0; i < message_size; ++i) {
         message[i] = static_cast<char>('A' + (i % 26));
     }
 
-    while (!should_stop.load()) {
+    while (!control->should_stop) {
         if (sem_wait(segment.producer_sem) == -1) {
             continue;
         }
 
-        if (should_stop.load())
+        if (control->should_stop)
             break;
 
         memcpy(buffer, message.data(), message_size);
@@ -100,17 +110,17 @@ void IPCBenchmark::producer(SharedMemorySegment& segment, size_t message_size,
             break;
         }
 
-        bytes_transferred.fetch_add(message_size);
+        __sync_fetch_and_add(&control->bytes_transferred, message_size);
     }
 }
 
-void IPCBenchmark::consumer(SharedMemorySegment& segment, size_t message_size,
-    std::atomic<bool>& should_stop, LatencyStats& stats)
+void IPCBenchmark::consumer(SharedMemorySegment& segment, size_t message_size, LatencyStats& stats)
 {
-    char* buffer = static_cast<char*>(segment.shm_ptr);
+    SharedControlBlock* control = static_cast<SharedControlBlock*>(segment.shm_ptr);
+    char* buffer = control->data;
     std::vector<char> received(message_size);
 
-    while (!should_stop.load()) {
+    while (!control->should_stop) {
         Timer op_timer;
         op_timer.start();
 
@@ -118,7 +128,7 @@ void IPCBenchmark::consumer(SharedMemorySegment& segment, size_t message_size,
             continue;
         }
 
-        if (should_stop.load())
+        if (control->should_stop)
             break;
 
         memcpy(received.data(), buffer, message_size);
@@ -135,8 +145,7 @@ void IPCBenchmark::consumer(SharedMemorySegment& segment, size_t message_size,
 double IPCBenchmark::measureThroughput(size_t message_size, int duration_seconds, LatencyStats& stats)
 {
     SharedMemorySegment segment = createSharedMemory();
-    std::atomic<bool> should_stop(false);
-    std::atomic<uint64_t> bytes_transferred(0);
+    SharedControlBlock* control = static_cast<SharedControlBlock*>(segment.shm_ptr);
 
     try {
         pid_t child_pid = fork();
@@ -144,17 +153,19 @@ double IPCBenchmark::measureThroughput(size_t message_size, int duration_seconds
         if (child_pid == -1) {
             throw std::runtime_error("Failed to fork process");
         } else if (child_pid == 0) {
-            consumer(segment, message_size, should_stop, stats);
+            // Child process - consumer
+            LatencyStats child_stats;
+            consumer(segment, message_size, child_stats);
             exit(0);
         } else {
+            // Parent process - producer
             Timer benchmark_timer;
             benchmark_timer.start();
 
-            std::thread producer_thread(&IPCBenchmark::producer, this, std::ref(segment),
-                message_size, std::ref(should_stop), std::ref(bytes_transferred));
+            std::thread producer_thread(&IPCBenchmark::producer, this, std::ref(segment), message_size);
 
             std::this_thread::sleep_for(std::chrono::seconds(duration_seconds));
-            should_stop.store(true);
+            control->should_stop = true;
 
             sem_post(segment.producer_sem);
             sem_post(segment.consumer_sem);
@@ -165,7 +176,7 @@ double IPCBenchmark::measureThroughput(size_t message_size, int duration_seconds
             waitpid(child_pid, &status, 0);
 
             double elapsed_seconds = benchmark_timer.elapsedSeconds();
-            double throughput_mbps = (bytes_transferred.load() / (1024.0 * 1024.0)) / elapsed_seconds;
+            double throughput_mbps = (control->bytes_transferred / (1024.0 * 1024.0)) / elapsed_seconds;
 
             destroySharedMemory(segment);
             return throughput_mbps;
