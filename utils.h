@@ -7,6 +7,16 @@
 #include <string>
 #include <vector>
 
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/thread_policy.h>
+#include <pthread.h>
+#include <sys/sysctl.h>
+#elif __linux__
+#include <sched.h>
+#include <pthread.h>
+#endif
+
 class LatencyStats {
 private:
     std::vector<double> samples;
@@ -133,6 +143,98 @@ public:
     {
         auto end = std::chrono::high_resolution_clock::now();
         return std::chrono::duration<double>(end - start_time).count();
+    }
+};
+
+// CPU Affinity utilities for production-grade benchmarking
+class CPUAffinity {
+public:
+    // Get the number of available CPU cores
+    static int getNumCores()
+    {
+#ifdef __APPLE__
+        int cores;
+        size_t len = sizeof(cores);
+        if (sysctlbyname("hw.ncpu", &cores, &len, NULL, 0) == 0) {
+            return cores;
+        }
+        return 1;
+#elif __linux__
+        return sysconf(_SC_NPROCESSORS_ONLN);
+#else
+        return 1;
+#endif
+    }
+
+    // Pin current thread to a specific CPU core (0-indexed)
+    static bool pinThreadToCore(int core_id)
+    {
+        if (core_id < 0 || core_id >= getNumCores()) {
+            return false;
+        }
+
+#ifdef __APPLE__
+        // macOS uses thread affinity tags (approximate core binding)
+        thread_affinity_policy_data_t policy = { core_id + 1 };
+        kern_return_t result = thread_policy_set(
+            mach_thread_self(),
+            THREAD_AFFINITY_POLICY,
+            (thread_policy_t)&policy,
+            THREAD_AFFINITY_POLICY_COUNT);
+        return result == KERN_SUCCESS;
+
+#elif __linux__
+        // Linux uses CPU sets for precise core binding
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(core_id, &cpuset);
+        
+        int result = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+        return result == 0;
+
+#else
+        return false;
+#endif
+    }
+
+    // Get current thread's CPU affinity
+    static std::vector<int> getCurrentAffinity()
+    {
+        std::vector<int> cores;
+        
+#ifdef __linux__
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        
+        if (pthread_getaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0) {
+            for (int i = 0; i < getNumCores(); ++i) {
+                if (CPU_ISSET(i, &cpuset)) {
+                    cores.push_back(i);
+                }
+            }
+        }
+#else
+        // For macOS, we can't easily query affinity, so return all cores
+        for (int i = 0; i < getNumCores(); ++i) {
+            cores.push_back(i);
+        }
+#endif
+        return cores;
+    }
+
+    // Reset thread affinity to use all available cores
+    static bool resetAffinity()
+    {
+#ifdef __linux__
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        for (int i = 0; i < getNumCores(); ++i) {
+            CPU_SET(i, &cpuset);
+        }
+        return pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0;
+#else
+        return true; // macOS doesn't need explicit reset
+#endif
     }
 };
 

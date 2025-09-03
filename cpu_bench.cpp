@@ -6,6 +6,9 @@
 
 void CPUBenchmark::runSingleThread(int thread_id)
 {
+    // Pin thread to specific CPU core for consistent performance
+    bool affinity_set = CPUAffinity::pinThreadToCore(thread_id % CPUAffinity::getNumCores());
+    
     std::mt19937 gen(thread_id);
     std::uniform_real_distribution<> dis(0.0, 1000.0);
 
@@ -148,7 +151,8 @@ BenchmarkResult CPUBenchmark::run(int duration_seconds, int iterations, bool ver
     try {
         if (verbose) {
             std::cout << "  Starting CPU benchmark with " << std::thread::hardware_concurrency()
-                      << " threads\n";
+                      << " threads on " << CPUAffinity::getNumCores() << " CPU cores\n";
+            std::cout << "  CPU affinity: threads will be pinned to cores\n";
         }
 
         total_ops.store(0);
@@ -203,6 +207,8 @@ BenchmarkResult CPUBenchmark::run(int duration_seconds, int iterations, bool ver
         result.extra_metrics["l3_cache_latency_ns"] = cache_latencies[2];
         result.extra_metrics["mem_latency_ns"] = cache_latencies[3];
         result.extra_metrics["threads_used"] = num_threads;
+        result.extra_metrics["cpu_cores"] = CPUAffinity::getNumCores();
+        result.extra_metrics["cpu_affinity_enabled"] = 1.0;
 
         result.status = "success";
 

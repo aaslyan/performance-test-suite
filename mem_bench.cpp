@@ -160,7 +160,7 @@ BenchmarkResult MemoryBenchmark::run(int duration_seconds, int iterations, bool 
         result.extra_metrics["buffer_size_mb"] = buffer_size / (1024.0 * 1024.0);
 
         if (verbose) {
-            std::cout << "  Running multi-threaded contention test...\n";
+            std::cout << "  Running multi-threaded contention test with CPU affinity...\n";
         }
 
         std::atomic<uint64_t> total_ops(0);
@@ -173,6 +173,9 @@ BenchmarkResult MemoryBenchmark::run(int duration_seconds, int iterations, bool 
 
         for (unsigned int i = 0; i < num_threads; ++i) {
             threads.emplace_back([&, i]() {
+                // Pin thread to CPU core for consistent memory performance
+                CPUAffinity::pinThreadToCore(i % CPUAffinity::getNumCores());
+                
                 size_t thread_offset = (buffer_size / num_threads) * i;
                 char* thread_buffer = static_cast<char*>(buffer) + thread_offset;
                 size_t thread_size = buffer_size / num_threads;
