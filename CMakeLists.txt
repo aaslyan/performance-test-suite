@@ -30,7 +30,12 @@ endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -O3")
 
 # Find required packages
-find_package(Threads REQUIRED)
+find_package(Threads)
+
+# Handle pthread linking for older systems
+if(CMAKE_USE_PTHREADS_INIT)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
+endif()
 
 # Source files
 set(SOURCES
@@ -60,8 +65,22 @@ set(HEADERS
 # Create executable
 add_executable(perf_test ${SOURCES})
 
-# Link libraries (CMake 2.8 compatible)
-target_link_libraries(perf_test ${CMAKE_THREAD_LIBS_INIT})
+# Link libraries (CMake 2.8 compatible with multiple fallbacks)
+if(CMAKE_THREAD_LIBS_INIT)
+    target_link_libraries(perf_test ${CMAKE_THREAD_LIBS_INIT})
+else()
+    # Fallback approaches for systems where find_package(Threads) fails
+    if(UNIX)
+        # Try pthread library directly
+        find_library(PTHREAD_LIB pthread)
+        if(PTHREAD_LIB)
+            target_link_libraries(perf_test ${PTHREAD_LIB})
+        else()
+            # Last resort - link pthread by name
+            target_link_libraries(perf_test pthread)
+        endif()
+    endif()
+endif()
 
 # Link rt library only on Linux (for shared memory)
 if(UNIX AND NOT APPLE)
