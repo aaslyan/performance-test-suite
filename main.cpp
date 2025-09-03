@@ -34,6 +34,7 @@ struct Config {
     std::string compare_format = "text";
     double warning_threshold = 10.0;
     double critical_threshold = 25.0;
+    bool show_charts = false;
 };
 
 void printUsage(const char* program_name)
@@ -53,6 +54,7 @@ void printUsage(const char* program_name)
               << "  --baseline=FILE     Baseline JSON report file\n"
               << "  --current=FILE      Current JSON report file\n"
               << "  --compare-format=FORMAT  Comparison format: text or markdown (default: text)\n"
+              << "  --chart             Show ASCII charts in comparison output\n"
               << "  --warning=PCT       Warning threshold percentage (default: 10.0)\n"
               << "  --critical=PCT      Critical threshold percentage (default: 25.0)\n"
               << "\nGeneral Options:\n"
@@ -60,6 +62,7 @@ void printUsage(const char* program_name)
               << "\nExamples:\n"
               << "  Benchmark: " << program_name << " --modules=cpu --duration=60 --report=results.json\n"
               << "  Compare:   " << program_name << " --compare --baseline=old.json --current=new.json\n"
+              << "  Charts:    " << program_name << " --compare --baseline=old.json --current=new.json --chart\n"
               << std::endl;
 }
 
@@ -94,6 +97,7 @@ Config parseArguments(int argc, char* argv[])
         { "baseline", required_argument, nullptr, 'b' },
         { "current", required_argument, nullptr, 'n' },
         { "compare-format", required_argument, nullptr, 'F' },
+        { "chart", no_argument, nullptr, 'H' },
         { "warning", required_argument, nullptr, 'w' },
         { "critical", required_argument, nullptr, 'C' },
         { nullptr, 0, nullptr, 0 }
@@ -102,7 +106,7 @@ Config parseArguments(int argc, char* argv[])
     int opt;
     int option_index = 0;
 
-    while ((opt = getopt_long(argc, argv, "m:d:i:r:f:vhcb:n:F:w:C:", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "m:d:i:r:f:vhcb:n:F:Hw:C:", long_options, &option_index)) != -1) {
         switch (opt) {
         case 'm':
             config.modules = splitString(optarg, ',');
@@ -152,6 +156,9 @@ Config parseArguments(int argc, char* argv[])
                 std::cerr << "Compare format must be 'text' or 'markdown'\n";
                 exit(1);
             }
+            break;
+        case 'H':
+            config.show_charts = true;
             break;
         case 'w':
             config.warning_threshold = std::stod(optarg);
@@ -239,7 +246,12 @@ int main(int argc, char* argv[])
             return 1;
         }
 
-        std::string report = engine.generateReport(config.compare_format);
+        std::string report;
+        if (config.show_charts) {
+            report = engine.generateReportWithCharts(config.compare_format);
+        } else {
+            report = engine.generateReport(config.compare_format);
+        }
         std::cout << report;
 
         // Exit with appropriate code based on health status

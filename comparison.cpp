@@ -1,4 +1,5 @@
 #include "comparison.h"
+#include "visualization.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -441,6 +442,31 @@ std::string ComparisonEngine::generateReport(const std::string& format)
     }
     ss << "=====================================\n";
 
+    return ss.str();
+}
+
+std::string ComparisonEngine::generateReportWithCharts(const std::string& format)
+{
+    std::stringstream ss;
+    
+    // Start with regular report
+    ss << generateReport(format);
+    
+    // Add ASCII charts
+    auto comparisons = compare();
+    
+    ss << "\n" << std::string(60, '=') << "\n";
+    ss << "                    VISUAL ANALYSIS\n";
+    ss << std::string(60, '=') << "\n";
+    
+    // Generate charts using the visualization module
+    ASCIIChart::ChartConfig chart_config;
+    chart_config.width = 70;
+    chart_config.use_colors = true;
+    chart_config.show_values = true;
+    
+    ss << ComparisonVisualizer::generateComparisonCharts(comparisons, chart_config);
+    
     return ss.str();
 }
 

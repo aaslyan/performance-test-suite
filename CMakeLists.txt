@@ -50,6 +50,7 @@ set(SOURCES
     integrated_bench.cpp
     report.cpp
     comparison.cpp
+    visualization.cpp
 )
 
 # Headers (for IDE support)
@@ -63,6 +64,7 @@ set(HEADERS
     integrated_bench.h
     report.h
     comparison.h
+    visualization.h
     utils.h
 )
 
