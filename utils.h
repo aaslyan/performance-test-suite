@@ -1,6 +1,11 @@
 #ifndef UTILS_H
 #define UTILS_H
 
+// Define _GNU_SOURCE before any includes for Linux CPU affinity functions
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -12,9 +17,10 @@
 #include <mach/thread_policy.h>
 #include <pthread.h>
 #include <sys/sysctl.h>
-#elif __linux__
+#elif defined(__linux__)
 #include <sched.h>
 #include <pthread.h>
+#include <unistd.h>
 #endif
 
 class LatencyStats {
@@ -159,8 +165,9 @@ public:
             return cores;
         }
         return 1;
-#elif __linux__
-        return sysconf(_SC_NPROCESSORS_ONLN);
+#elif defined(__linux__)
+        long cores = sysconf(_SC_NPROCESSORS_ONLN);
+        return (cores > 0) ? static_cast<int>(cores) : 1;
 #else
         return 1;
 #endif
