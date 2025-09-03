@@ -11,10 +11,15 @@ add_compile_options(-Wall -Wextra -O3)
 # Find required packages
 find_package(Threads REQUIRED)
 
-# Source files (start with minimal set for testing)
+# Source files
 set(SOURCES
     main.cpp
     cpu_bench.cpp
+    mem_bench.cpp
+    disk_bench.cpp
+    net_bench.cpp
+    ipc_bench.cpp
+    integrated_bench.cpp
     report.cpp
 )
 

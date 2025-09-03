@@ -9,6 +9,11 @@
 
 #include "benchmark.h"
 #include "cpu_bench.h"
+#include "mem_bench.h"
+#include "disk_bench.h"
+#include "net_bench.h"
+#include "ipc_bench.h"
+#include "integrated_bench.h"
 #include "report.h"
 #include "utils.h"
 
@@ -112,10 +117,39 @@ Config parseArguments(int argc, char* argv[]) {
     }
     
     if (config.modules.empty()) {
-        config.modules = {"cpu"};  // Default to just CPU for now
+        config.modules = {"all"};
+    }
+    
+    // Expand "all" to include all modules
+    if (std::find(config.modules.begin(), config.modules.end(), "all") != config.modules.end()) {
+        config.modules = {"cpu", "mem", "disk", "net", "ipc", "integrated"};
     }
     
     return config;
+}
+
+std::vector<std::unique_ptr<Benchmark>> createBenchmarks(const std::vector<std::string>& modules) {
+    std::vector<std::unique_ptr<Benchmark>> benchmarks;
+    
+    for (const auto& module : modules) {
+        if (module == "cpu") {
+            benchmarks.push_back(std::make_unique<CPUBenchmark>());
+        } else if (module == "mem") {
+            benchmarks.push_back(std::make_unique<MemoryBenchmark>());
+        } else if (module == "disk") {
+            benchmarks.push_back(std::make_unique<DiskBenchmark>());
+        } else if (module == "net") {
+            benchmarks.push_back(std::make_unique<NetworkBenchmark>());
+        } else if (module == "ipc") {
+            benchmarks.push_back(std::make_unique<IPCBenchmark>());
+        } else if (module == "integrated") {
+            benchmarks.push_back(std::make_unique<IntegratedBenchmark>());
+        } else {
+            std::cerr << "Unknown module: " << module << std::endl;
+        }
+    }
+    
+    return benchmarks;
 }
 
 int main(int argc, char* argv[]) {
@@ -146,13 +180,20 @@ int main(int argc, char* argv[]) {
     Report report;
     report.setSystemInfo(system_info);
     
-    // For now, just run CPU benchmark as a basic test
-    if (std::find(config.modules.begin(), config.modules.end(), "cpu") != config.modules.end()) {
-        std::cout << "Running CPU benchmark...\n";
+    // Create benchmarks
+    auto benchmarks = createBenchmarks(config.modules);
+    
+    if (benchmarks.empty()) {
+        std::cerr << "No valid benchmarks to run\n";
+        return 1;
+    }
+    
+    // Run benchmarks
+    for (auto& benchmark : benchmarks) {
+        std::cout << "Running " << benchmark->getName() << " benchmark...\n";
         
         try {
-            CPUBenchmark cpu_bench;
-            BenchmarkResult result = cpu_bench.run(config.duration, config.iterations, config.verbose);
+            BenchmarkResult result = benchmark->run(config.duration, config.iterations, config.verbose);
             report.addResult(result);
             
             if (config.verbose) {
@@ -166,7 +207,14 @@ int main(int argc, char* argv[]) {
             }
         } catch (const std::exception& e) {
             std::cerr << "  Error: " << e.what() << "\n";
+            BenchmarkResult error_result;
+            error_result.name = benchmark->getName();
+            error_result.status = "error";
+            error_result.error_message = e.what();
+            report.addResult(error_result);
         }
+        
+        std::cout << std::endl;
     }
     
     if (config.report_file.empty()) {
