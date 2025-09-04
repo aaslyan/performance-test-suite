@@ -294,6 +294,7 @@ void PlatformDetector::detectLinuxInfo(PlatformInfo& info)
     }
 }
 
+#ifdef __APPLE__
 void PlatformDetector::detectMacOSInfo(PlatformInfo& info)
 {
     // CPU model
@@ -344,6 +345,13 @@ void PlatformDetector::detectMacOSInfo(PlatformInfo& info)
     // Architecture
     info.cpu_architecture = "Apple Silicon"; // Assume modern Macs
 }
+#else
+void PlatformDetector::detectMacOSInfo(PlatformInfo& info)
+{
+    // Empty stub for non-macOS platforms
+    (void)info; // Suppress unused parameter warning
+}
+#endif
 
 void PlatformDetector::detectMemoryInfo(PlatformInfo& info)
 {
