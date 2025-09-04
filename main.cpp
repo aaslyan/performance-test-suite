@@ -15,6 +15,7 @@
 #include "ipc_bench.h"
 #include "mem_bench.h"
 #include "net_bench.h"
+#include "performance_context.h"
 #include "report.h"
 #include "utils.h"
 
@@ -35,6 +36,11 @@ struct Config {
     double warning_threshold = 10.0;
     double critical_threshold = 25.0;
     bool show_charts = false;
+    
+    // Performance context options
+    bool context_mode = false;
+    bool system_check = false;
+    bool show_platform_info = false;
 };
 
 void printUsage(const char* program_name)
@@ -57,12 +63,19 @@ void printUsage(const char* program_name)
               << "  --chart             Show ASCII charts in comparison output\n"
               << "  --warning=PCT       Warning threshold percentage (default: 10.0)\n"
               << "  --critical=PCT      Critical threshold percentage (default: 25.0)\n"
+              << "\nPerformance Context Options:\n"
+              << "  --context           Enable contextual benchmarking with system monitoring\n"
+              << "  --system-check      Check system readiness for benchmarking\n"
+              << "  --platform-info     Show detailed platform information\n"
               << "\nGeneral Options:\n"
               << "  --help              Show this help message\n"
               << "\nExamples:\n"
               << "  Benchmark: " << program_name << " --modules=cpu --duration=60 --report=results.json\n"
               << "  Compare:   " << program_name << " --compare --baseline=old.json --current=new.json\n"
               << "  Charts:    " << program_name << " --compare --baseline=old.json --current=new.json --chart\n"
+              << "  Context:   " << program_name << " --context --modules=cpu --verbose\n"
+              << "  SysCheck:  " << program_name << " --system-check\n"
+              << "  Platform:  " << program_name << " --platform-info\n"
               << std::endl;
 }
 
@@ -100,13 +113,16 @@ Config parseArguments(int argc, char* argv[])
         { "chart", no_argument, nullptr, 'H' },
         { "warning", required_argument, nullptr, 'w' },
         { "critical", required_argument, nullptr, 'C' },
+        { "context", no_argument, nullptr, 'x' },
+        { "system-check", no_argument, nullptr, 's' },
+        { "platform-info", no_argument, nullptr, 'p' },
         { nullptr, 0, nullptr, 0 }
     };
 
     int opt;
     int option_index = 0;
 
-    while ((opt = getopt_long(argc, argv, "m:d:i:r:f:vhcb:n:F:Hw:C:", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "m:d:i:r:f:vhcb:n:F:Hw:C:xsp", long_options, &option_index)) != -1) {
         switch (opt) {
         case 'm':
             config.modules = splitString(optarg, ',');
@@ -174,6 +190,15 @@ Config parseArguments(int argc, char* argv[])
                 exit(1);
             }
             break;
+        case 'x':
+            config.context_mode = true;
+            break;
+        case 's':
+            config.system_check = true;
+            break;
+        case 'p':
+            config.show_platform_info = true;
+            break;
         default:
             printUsage(argv[0]);
             exit(1);
@@ -223,6 +248,54 @@ int main(int argc, char* argv[])
 
     if (config.help) {
         printUsage(argv[0]);
+        return 0;
+    }
+
+    // Handle performance context modes
+    PerformanceContextAnalyzer analyzer;
+    
+    if (config.show_platform_info) {
+        std::cout << "Platform Information\n";
+        std::cout << "===================\n\n";
+        
+        PlatformInfo platform = analyzer.getCurrentPlatform();
+        std::cout << platform.getSummary() << "\n\n";
+        std::cout << "Performance Score: " << platform.getPerformanceScore() << "/100\n\n";
+        
+        if (!platform.performance_issues.empty()) {
+            std::cout << "Performance Issues:\n";
+            for (const auto& issue : platform.performance_issues) {
+                std::cout << "- " << issue << "\n";
+            }
+            std::cout << "\n";
+        }
+        
+        std::vector<std::string> recommendations = analyzer.getPreBenchmarkRecommendations();
+        if (!recommendations.empty()) {
+            std::cout << "Optimization Recommendations:\n";
+            for (const auto& rec : recommendations) {
+                std::cout << "- " << rec << "\n";
+            }
+        }
+        return 0;
+    }
+    
+    if (config.system_check) {
+        std::cout << "System Readiness Check\n";
+        std::cout << "=====================\n\n";
+        
+        std::cout << PerformanceContext::getSystemReadinessReport();
+        
+        bool ready = PerformanceContext::isSystemBenchmarkReady();
+        std::cout << "\nSystem Ready for Benchmarking: " << (ready ? "YES" : "NO") << "\n\n";
+        
+        std::vector<std::string> tips = PerformanceContext::getQuickOptimizationTips();
+        if (!tips.empty()) {
+            std::cout << "Quick Optimization Tips:\n";
+            for (const auto& tip : tips) {
+                std::cout << "- " << tip << "\n";
+            }
+        }
         return 0;
     }
 
@@ -291,32 +364,110 @@ int main(int argc, char* argv[])
     }
 
     // Run benchmarks
-    for (auto& benchmark : benchmarks) {
-        std::cout << "Running " << benchmark->getName() << " benchmark...\n";
-
-        try {
-            BenchmarkResult result = benchmark->run(config.duration, config.iterations, config.verbose);
-            report.addResult(result);
-
-            if (config.verbose) {
-                std::cout << "  Status: " << result.status << "\n";
-                if (result.status == "success") {
-                    std::cout << "  Throughput: " << result.throughput << " " << result.throughput_unit << "\n";
-                    std::cout << "  Avg Latency: " << result.avg_latency << " " << result.latency_unit << "\n";
-                } else {
-                    std::cout << "  Error: " << result.error_message << "\n";
+    if (config.context_mode) {
+        std::cout << "Running benchmarks with performance context analysis...\n\n";
+        
+        // Show system environment first
+        if (config.verbose) {
+            std::cout << "System Environment Analysis:\n";
+            std::cout << analyzer.getPlatformSummary() << "\n";
+            
+            PerformanceEnvironment env = analyzer.analyzeCurrentEnvironment();
+            if (!env.is_optimal_for_benchmarking) {
+                std::cout << "Warning: System environment is not optimal for benchmarking\n";
+                std::cout << "Environment Score: " << env.environment_score << "/100\n";
+                for (const auto& issue : env.environment_issues) {
+                    std::cout << "- " << issue << "\n";
                 }
+                std::cout << "\n";
             }
-        } catch (const std::exception& e) {
-            std::cerr << "  Error: " << e.what() << "\n";
-            BenchmarkResult error_result;
-            error_result.name = benchmark->getName();
-            error_result.status = "error";
-            error_result.error_message = e.what();
-            report.addResult(error_result);
         }
+        
+        for (auto& benchmark : benchmarks) {
+            std::cout << "Running " << benchmark->getName() << " benchmark with context analysis...\n";
+            
+            try {
+                ContextualBenchmarkResult contextual_result = analyzer.runBenchmarkWithContext(
+                    benchmark.get(), config.duration, config.iterations, config.verbose);
+                
+                // Add the base result to the report
+                report.addResult(contextual_result.benchmark_result);
+                
+                // Show contextual information
+                std::cout << "\nContextual Analysis:\n";
+                std::cout << "  Reliability Score: " << static_cast<int>(contextual_result.reliability_score) << "/100\n";
+                std::cout << "  Status: " << contextual_result.benchmark_result.status << "\n";
+                
+                if (contextual_result.benchmark_result.status == "success") {
+                    std::cout << "  Result: " << PerformanceContext::interpretThroughputResult(
+                        contextual_result.benchmark_result.throughput, 
+                        contextual_result.benchmark_result.throughput_unit) << "\n";
+                    std::cout << "  Latency: " << PerformanceContext::interpretLatencyResult(
+                        contextual_result.benchmark_result.avg_latency, 
+                        contextual_result.benchmark_result.latency_unit) << "\n";
+                }
+                
+                std::cout << "  Reliability: " << PerformanceContext::interpretReliabilityScore(
+                    contextual_result.reliability_score) << "\n";
+                
+                if (contextual_result.interference_report.hasInterference()) {
+                    std::cout << "  Interference: " << contextual_result.interference_report.getSummary() << "\n";
+                }
+                
+                if (!contextual_result.context_warnings.empty() && config.verbose) {
+                    std::cout << "  Warnings:\n";
+                    for (const auto& warning : contextual_result.context_warnings) {
+                        std::cout << "    - " << warning << "\n";
+                    }
+                }
+                
+                if (!contextual_result.optimization_suggestions.empty() && config.verbose) {
+                    std::cout << "  Suggestions:\n";
+                    for (const auto& suggestion : contextual_result.optimization_suggestions) {
+                        std::cout << "    - " << suggestion << "\n";
+                    }
+                }
+                
+            } catch (const std::exception& e) {
+                std::cerr << "  Error: " << e.what() << "\n";
+                BenchmarkResult error_result;
+                error_result.name = benchmark->getName();
+                error_result.status = "error";
+                error_result.error_message = e.what();
+                report.addResult(error_result);
+            }
+            
+            std::cout << std::endl;
+        }
+    } else {
+        // Standard benchmark mode
+        for (auto& benchmark : benchmarks) {
+            std::cout << "Running " << benchmark->getName() << " benchmark...\n";
 
-        std::cout << std::endl;
+            try {
+                BenchmarkResult result = benchmark->run(config.duration, config.iterations, config.verbose);
+                report.addResult(result);
+
+                if (config.verbose) {
+                    std::cout << "  Status: " << result.status << "\n";
+                    if (result.status == "success") {
+                        std::cout << "  Throughput: " << result.throughput << " " << result.throughput_unit << "\n";
+                        std::cout << "  Avg Latency: " << result.avg_latency << " " << result.latency_unit << "\n";
+                    } else {
+                        std::cout << "  Error: " << result.error_message << "\n";
+                    }
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "  Error: " << e.what() << "\n";
+                BenchmarkResult error_result;
+                error_result.name = benchmark->getName();
+                error_result.status = "error";
+                error_result.error_message = e.what();
+                report.addResult(error_result);
+            }
+
+            std::cout << std::endl;
+        }
     }
 
     if (config.report_file.empty()) {

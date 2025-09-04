@@ -51,6 +51,9 @@ set(SOURCES
     report.cpp
     comparison.cpp
     visualization.cpp
+    system_monitor.cpp
+    platform_detector.cpp
+    performance_context.cpp
 )
 
 # Headers (for IDE support)
@@ -66,6 +69,9 @@ set(HEADERS
     comparison.h
     visualization.h
     utils.h
+    system_monitor.h
+    platform_detector.h
+    performance_context.h
 )
 
 # Create executable
