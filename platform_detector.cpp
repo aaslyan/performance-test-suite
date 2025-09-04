@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <cstdint>
 
 #ifdef __APPLE__
 #include <sys/mount.h>
