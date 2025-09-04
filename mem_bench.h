@@ -16,6 +16,7 @@ private:
     double measureSequentialRead(void* buffer, size_t size, int iterations);
     double measureSequentialWrite(void* buffer, size_t size, int iterations);
     double measureRandomAccess(void* buffer, size_t size, int iterations, LatencyStats& stats);
+    double measureRandomAccessBatch(void* buffer, size_t size, int iterations, double& avg_latency_ns);
 
 public:
     BenchmarkResult run(int duration_seconds, int iterations, bool verbose) override;

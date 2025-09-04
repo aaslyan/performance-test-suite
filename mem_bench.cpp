@@ -151,6 +151,55 @@ double MemoryBenchmark::measureRandomAccess(void* buffer, size_t size, int itera
     return ops_per_second;
 }
 
+double MemoryBenchmark::measureRandomAccessBatch(void* buffer, size_t size, int iterations, double& avg_latency_ns)
+{
+    char* mem = static_cast<char*>(buffer);
+    size_t num_elements = size / sizeof(long long);
+    long long* array = reinterpret_cast<long long*>(mem);
+
+    // Pre-generate random indices to avoid RNG overhead in timing loop
+    std::vector<size_t> indices(iterations);
+    std::mt19937 gen(42);
+    std::uniform_int_distribution<size_t> dis(0, num_elements - 1);
+
+    for (auto& idx : indices) {
+        idx = dis(gen);
+    }
+
+    // Warm-up run to stabilize cache and TLB
+    long long warmup_sum = 0;
+    for (int i = 0; i < std::min(1000, iterations); ++i) {
+        warmup_sum += array[indices[i]];
+        array[indices[i]] = warmup_sum;
+    }
+
+    // Actual measurement - batch timing for accuracy
+    Timer batch_timer;
+    batch_timer.start();
+
+    long long sum = 0;
+    for (int i = 0; i < iterations; ++i) {
+        sum += array[indices[i]];
+        array[indices[i]] = sum;
+    }
+
+    double elapsed_nanoseconds = batch_timer.elapsedNanoseconds();
+    
+    // Calculate accurate average latency
+    avg_latency_ns = elapsed_nanoseconds / iterations;
+    
+    // Calculate operations per second
+    double elapsed_seconds = elapsed_nanoseconds / NANOSECONDS_PER_SECOND;
+    double ops_per_second = iterations / elapsed_seconds;
+
+    // Prevent compiler optimization
+    if (sum == 0) {
+        std::cout << "";
+    }
+
+    return ops_per_second;
+}
+
 BenchmarkResult MemoryBenchmark::run(int duration_seconds, int iterations, bool verbose)
 {
     BenchmarkResult result;
@@ -194,16 +243,33 @@ BenchmarkResult MemoryBenchmark::run(int duration_seconds, int iterations, bool 
         double write_throughput = measureSequentialWrite(buffer, buffer_size, 10);
 
         if (verbose) {
-            std::cout << "  Running random access test...\n";
+            std::cout << "  Running random access test (individual timing for distribution)...\n";
         }
 
         LatencyStats random_stats;
         double random_ops = measureRandomAccess(buffer, buffer_size, iterations * 100, random_stats);
 
+        if (verbose) {
+            std::cout << "  Running random access test (batch timing for accuracy)...\n";
+        }
+
+        // Run batch timing for accurate average latency
+        double batch_avg_latency_ns = 0.0;
+        double batch_random_ops = measureRandomAccessBatch(buffer, buffer_size, iterations * 1000, batch_avg_latency_ns);
+        double batch_avg_latency_us = batch_avg_latency_ns / 1000.0;
+
+        if (verbose) {
+            std::cout << "  Random Access Timing Comparison:\n";
+            std::cout << "    Individual timing: " << random_stats.getAverage() << " us avg (includes timer overhead)\n";
+            std::cout << "    Batch timing:      " << batch_avg_latency_us << " us avg (accurate)\n";
+            std::cout << "    Timer overhead:    " << (random_stats.getAverage() - batch_avg_latency_us) << " us per measurement\n";
+        }
+
         result.throughput = (read_throughput + write_throughput) / 2.0;
         result.throughput_unit = "MB/s";
 
-        result.avg_latency = random_stats.getAverage();
+        // Use batch timing for accurate average, but keep distribution stats from individual timing
+        result.avg_latency = batch_avg_latency_us;  // Use accurate batch-measured average
         result.min_latency = random_stats.getMin();
         result.max_latency = random_stats.getMax();
         result.p50_latency = random_stats.getPercentile(50);
@@ -214,6 +280,9 @@ BenchmarkResult MemoryBenchmark::run(int duration_seconds, int iterations, bool 
         result.extra_metrics["sequential_read_mbps"] = read_throughput;
         result.extra_metrics["sequential_write_mbps"] = write_throughput;
         result.extra_metrics["random_access_ops_sec"] = random_ops;
+        result.extra_metrics["random_access_batch_ops_sec"] = batch_random_ops;
+        result.extra_metrics["random_latency_batch_ns"] = batch_avg_latency_ns;
+        result.extra_metrics["random_latency_overhead_us"] = random_stats.getAverage() - batch_avg_latency_us;
         result.extra_metrics["buffer_size_mb"] = buffer_size / (1024.0 * 1024.0);
 
         if (verbose) {
