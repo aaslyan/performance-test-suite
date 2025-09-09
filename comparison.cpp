@@ -199,11 +199,23 @@ bool ComparisonEngine::parseJSONReport(const std::string& json_content,
         if (bench_start == std::string::npos)
             break;
 
-        size_t bench_end = json_content.find("}", bench_start);
-        if (bench_end == std::string::npos)
-            break;
+        // Find matching closing brace by counting nesting levels
+        int brace_count = 1;
+        size_t bench_end = bench_start + 1;
+        while (bench_end < json_content.length() && brace_count > 0) {
+            if (json_content[bench_end] == '{') {
+                brace_count++;
+            } else if (json_content[bench_end] == '}') {
+                brace_count--;
+            }
+            bench_end++;
+        }
 
-        std::string bench_json = json_content.substr(bench_start, bench_end - bench_start + 1);
+        if (brace_count != 0) {
+            break; // Malformed JSON
+        }
+
+        std::string bench_json = json_content.substr(bench_start, bench_end - bench_start);
 
         BenchmarkResult result;
         result.name = extractJSONString(bench_json, "name");
