@@ -45,11 +45,13 @@ info() {
 prepare_system() {
     log "Preparing system for consistent benchmarking..."
 
-    # Capture initial platform info (skip system-check as it may require elevated permissions)
+    # Skip both system-check and platform-info as they may require sudo
     # ./perf_test --system-check > "$OUTPUT_DIR/system_check.txt" 2>&1
+    # ./perf_test --platform-info > "$OUTPUT_DIR/platform_info.txt" 2>&1
 
-    # Just capture platform info which doesn't require sudo
-    ./perf_test --platform-info > "$OUTPUT_DIR/platform_info.txt" 2>&1
+    # Just record basic system info without using perf_test
+    echo "Test started at: $(date)" > "$OUTPUT_DIR/platform_info.txt"
+    echo "OS: $(uname -a)" >> "$OUTPUT_DIR/platform_info.txt"
 
     # Get baseline system metrics
     log "Capturing baseline system metrics..."
@@ -218,11 +220,16 @@ analyze_consistency() {
     echo "" >> "$OUTPUT_DIR/consistency_report.txt"
 
     # Define metrics to analyze for each module
-    declare -A module_metrics
-    module_metrics["cpu"]="throughput_ops latency_ns"
-    module_metrics["mem"]="bandwidth_mbps latency_ns"
-    module_metrics["disk"]="read_mbps write_mbps"
-    module_metrics["net"]="throughput_mbps latency_ms"
+    # Using case statement instead of associative array for compatibility
+    get_module_metrics() {
+        case $1 in
+            cpu) echo "throughput_ops latency_ns";;
+            mem) echo "bandwidth_mbps latency_ns";;
+            disk) echo "read_mbps write_mbps";;
+            net) echo "throughput_mbps latency_ms";;
+            *) echo "throughput latency";;
+        esac
+    }
 
     echo "Metric Analysis:" >> "$OUTPUT_DIR/consistency_report.txt"
     echo "----------------" >> "$OUTPUT_DIR/consistency_report.txt"
@@ -233,7 +240,7 @@ analyze_consistency() {
         echo "[$module benchmark]" >> "$OUTPUT_DIR/consistency_report.txt"
 
         # Get metrics for this module
-        metrics=${module_metrics[$module]:-"throughput latency"}
+        metrics=$(get_module_metrics $module)
 
         for metric in $metrics; do
             values=()
