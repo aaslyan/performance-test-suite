@@ -45,10 +45,10 @@ info() {
 prepare_system() {
     log "Preparing system for consistent benchmarking..."
 
-    # Check system readiness
-    ./perf_test --system-check > "$OUTPUT_DIR/system_check.txt" 2>&1
+    # Capture initial platform info (skip system-check as it may require elevated permissions)
+    # ./perf_test --system-check > "$OUTPUT_DIR/system_check.txt" 2>&1
 
-    # Capture initial platform info
+    # Just capture platform info which doesn't require sudo
     ./perf_test --platform-info > "$OUTPUT_DIR/platform_info.txt" 2>&1
 
     # Get baseline system metrics
