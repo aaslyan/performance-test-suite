@@ -15,6 +15,7 @@ struct MetricComparison {
     double absolute_diff;
     double percent_change;
     std::string unit;
+    bool higher_is_better = true; // Whether higher values are better for this metric
 
     enum Status {
         IMPROVED, // Performance improved

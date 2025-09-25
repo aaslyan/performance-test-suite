@@ -52,13 +52,11 @@ double extractJSONNumber(const std::string& json, const std::string& key)
 // MetricComparison implementation
 void MetricComparison::calculateStatus(double warning_threshold, double critical_threshold)
 {
-    // For throughput metrics (higher is better)
-    bool higher_is_better = true;
-    if (metric_name.find("latency") != std::string::npos || metric_name.find("time") != std::string::npos) {
-        higher_is_better = false; // For latency, lower is better
-    }
+    // Use the higher_is_better flag passed from compareMetric
+    // No need to guess from metric name anymore
 
     if (higher_is_better) {
+        // For metrics where higher is better (throughput, bandwidth, IOPS, etc.)
         if (percent_change > 5.0) {
             status = IMPROVED;
         } else if (percent_change >= -warning_threshold) {
@@ -69,7 +67,8 @@ void MetricComparison::calculateStatus(double warning_threshold, double critical
             status = CRITICAL;
         }
     } else {
-        // For latency (lower is better), invert the logic
+        // For metrics where lower is better (latency, response time, etc.)
+        // Negative percent_change means improvement
         if (percent_change < -5.0) {
             status = IMPROVED;
         } else if (percent_change <= warning_threshold) {
@@ -305,6 +304,8 @@ MetricComparison ComparisonEngine::compareMetric(const std::string& name,
         comp.percent_change = (current != 0) ? 100.0 : 0.0;
     }
 
+    // Store the higher_is_better flag for proper status calculation
+    comp.higher_is_better = higher_is_better;
     comp.calculateStatus(warning_threshold, critical_threshold);
 
     return comp;
