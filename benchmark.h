@@ -18,6 +18,7 @@ struct BenchmarkResult {
     double p99_latency;
     std::string latency_unit;
     std::map<std::string, double> extra_metrics;
+    std::map<std::string, std::string> extra_info;
     std::string status;
     std::string error_message;
 };

@@ -1,6 +1,7 @@
 #include "system_monitor.h"
 #include <algorithm>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <numeric>
 #include <sstream>
@@ -52,6 +53,7 @@ void ResourceMetrics::reset()
     
     monitoring_duration_seconds = 0.0;
     sample_count = 0;
+    sample_timestamp_seconds = 0.0;
 }
 
 std::string ResourceMetrics::toJson() const
@@ -185,6 +187,7 @@ void SystemMonitor::monitoringLoop()
 
         try {
             ResourceMetrics current = collectCurrentMetrics();
+            current.sample_timestamp_seconds = monitoring_timer.elapsedSeconds();
             samples.push_back(current);
         } catch (const std::exception& e) {
             // Continue monitoring even if one sample fails
@@ -674,6 +677,80 @@ void SystemMonitor::getSystemLoad(double& load1, double& load5, uint32_t& proces
         processes = size / sizeof(struct kinfo_proc);
     }
 #endif
+}
+
+bool SystemMonitor::writeSamplesToFile(const std::string& path) const
+{
+    if (path.empty()) {
+        return false;
+    }
+
+    auto toLower = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return value;
+    };
+
+    std::string lower_path = toLower(path);
+    bool as_json = lower_path.size() >= 5 && lower_path.substr(lower_path.size() - 5) == ".json";
+
+    std::ofstream out(path);
+    if (!out.is_open()) {
+        return false;
+    }
+
+    if (as_json) {
+        out << "[\n";
+        for (size_t i = 0; i < samples.size(); ++i) {
+            const auto& s = samples[i];
+            out << "  {\n";
+            out << "    \"index\": " << i << ",\n";
+            out << "    \"timestamp_s\": " << std::fixed << std::setprecision(3) << s.sample_timestamp_seconds << ",\n";
+            out << "    \"cpu_usage_percent\": " << s.avg_cpu_usage_percent << ",\n";
+            out << "    \"cpu_frequency_mhz\": " << s.cpu_frequency_mhz << ",\n";
+            out << "    \"io_wait_percent\": " << s.avg_io_wait_percent << ",\n";
+            out << "    \"memory_used_mb\": " << s.memory_used_mb << ",\n";
+            out << "    \"memory_available_mb\": " << s.memory_available_mb << ",\n";
+            out << "    \"memory_usage_percent\": " << s.memory_usage_percent << ",\n";
+            out << "    \"disk_read_mbps\": " << s.disk_read_mbps << ",\n";
+            out << "    \"disk_write_mbps\": " << s.disk_write_mbps << ",\n";
+            out << "    \"network_rx_mbps\": " << s.network_rx_mbps << ",\n";
+            out << "    \"network_tx_mbps\": " << s.network_tx_mbps << ",\n";
+            out << "    \"load_average_1min\": " << s.load_average_1min << ",\n";
+            out << "    \"load_average_5min\": " << s.load_average_5min << ",\n";
+            out << "    \"thermal_throttling\": " << (s.thermal_throttling_detected ? "true" : "false") << "\n";
+            out << "  }";
+            if (i + 1 < samples.size()) {
+                out << ",\n";
+            } else {
+                out << "\n";
+            }
+        }
+        out << "]\n";
+    } else {
+        out << "index,timestamp_s,cpu_usage_percent,cpu_frequency_mhz,io_wait_percent,";
+        out << "memory_used_mb,memory_available_mb,memory_usage_percent,disk_read_mbps,disk_write_mbps,";
+        out << "network_rx_mbps,network_tx_mbps,load_average_1min,load_average_5min,thermal_throttling\n";
+        for (size_t i = 0; i < samples.size(); ++i) {
+            const auto& s = samples[i];
+            out << i << ','
+                << std::fixed << std::setprecision(3) << s.sample_timestamp_seconds << ','
+                << s.avg_cpu_usage_percent << ','
+                << s.cpu_frequency_mhz << ','
+                << s.avg_io_wait_percent << ','
+                << s.memory_used_mb << ','
+                << s.memory_available_mb << ','
+                << s.memory_usage_percent << ','
+                << s.disk_read_mbps << ','
+                << s.disk_write_mbps << ','
+                << s.network_rx_mbps << ','
+                << s.network_tx_mbps << ','
+                << s.load_average_1min << ','
+                << s.load_average_5min << ','
+                << (s.thermal_throttling_detected ? 1 : 0) << '\n';
+        }
+    }
+
+    return true;
 }
 
 ResourceMetrics SystemMonitor::getAverageMetrics()

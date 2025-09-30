@@ -44,6 +44,7 @@ struct ResourceMetrics {
     // Timing
     double monitoring_duration_seconds;
     size_t sample_count;
+    double sample_timestamp_seconds;
     
     ResourceMetrics();
     void reset();
@@ -137,6 +138,7 @@ public:
     ResourceMetrics getPeakMetrics();
     std::vector<ResourceMetrics> getAllSamples();
     ResourceMetrics collectCurrentMetrics();
+    bool writeSamplesToFile(const std::string& path) const;
     
     // Analysis
     InterferenceReport analyzeInterference();

@@ -229,7 +229,7 @@ std::vector<std::string> PerformanceContextAnalyzer::getPreBenchmarkRecommendati
 }
 
 ContextualBenchmarkResult PerformanceContextAnalyzer::runBenchmarkWithContext(
-    Benchmark* benchmark, int duration_seconds, int iterations, bool verbose)
+    Benchmark* benchmark, int duration_seconds, int iterations, bool verbose, bool collect_perf_counters)
 {
     if (!benchmark) {
         ContextualBenchmarkResult result;
@@ -248,6 +248,10 @@ ContextualBenchmarkResult PerformanceContextAnalyzer::runBenchmarkWithContext(
     
     // Start system monitoring
     system_monitor.startMonitoring();
+
+    PerfCounterSet perf_counters;
+    PerfCounterSample perf_sample;
+    bool perf_enabled = collect_perf_counters && perf_counters.start();
     
     // Run the benchmark
     if (verbose) {
@@ -256,12 +260,37 @@ ContextualBenchmarkResult PerformanceContextAnalyzer::runBenchmarkWithContext(
     
     BenchmarkResult bench_result = benchmark->run(duration_seconds, iterations, verbose);
     
+    if (collect_perf_counters) {
+        perf_sample = perf_counters.stop();
+        if (perf_sample.valid) {
+            bench_result.extra_metrics["perf_cpu_cycles"] = static_cast<double>(perf_sample.cycles);
+            bench_result.extra_metrics["perf_cpu_instructions"] = static_cast<double>(perf_sample.instructions);
+            bench_result.extra_metrics["perf_l3_cache_misses"] = static_cast<double>(perf_sample.cache_misses);
+            bench_result.extra_metrics["perf_branches"] = static_cast<double>(perf_sample.branches);
+            bench_result.extra_metrics["perf_branch_misses"] = static_cast<double>(perf_sample.branch_misses);
+            if (perf_sample.instructions > 0) {
+                bench_result.extra_metrics["perf_cpi"] = static_cast<double>(perf_sample.cycles) /
+                    static_cast<double>(perf_sample.instructions);
+            }
+            bench_result.extra_info["perf.counters"] = "perf_event_open";
+        } else {
+            bench_result.extra_info["perf.counters"] = perf_enabled ? "unavailable" : "insufficient_permissions";
+        }
+    } else {
+        bench_result.extra_info["perf.counters"] = "disabled";
+        perf_counters.stop();
+    }
+    
     // Stop monitoring and collect results
     system_monitor.stopMonitoring();
     
     ResourceMetrics avg_metrics = system_monitor.getAverageMetrics();
     ResourceMetrics peak_metrics = system_monitor.getPeakMetrics();
     InterferenceReport interference = system_monitor.analyzeInterference();
+
+    for (const auto& entry : getBuildMetadataMap()) {
+        bench_result.extra_info[entry.first] = entry.second;
+    }
     
     // Cool down system
     cooldownSystem(2);

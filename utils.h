@@ -9,6 +9,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -159,7 +162,261 @@ public:
     }
 };
 
+#ifdef __linux__
+#include <cerrno>
+#include <linux/perf_event.h>
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
+#endif
+
+struct PerfCounterSample {
+    bool valid { false };
+    uint64_t cycles { 0 };
+    uint64_t instructions { 0 };
+    uint64_t cache_misses { 0 };
+    uint64_t branches { 0 };
+    uint64_t branch_misses { 0 };
+};
+
+class PerfCounterSet {
+public:
+    PerfCounterSet() = default;
+    ~PerfCounterSet()
+    {
+        stop();
+#ifdef __linux__
+        closeAll();
+#endif
+    }
+
+    bool start()
+    {
+#ifdef __linux__
+        closeAll();
+        opened_counters = 0;
+        fd_cycles = openCounter(PERF_TYPE_HARDWARE, PERF_COUNT_HW_CPU_CYCLES);
+        fd_instructions = openCounter(PERF_TYPE_HARDWARE, PERF_COUNT_HW_INSTRUCTIONS);
+        fd_cache_misses = openCounter(PERF_TYPE_HARDWARE, PERF_COUNT_HW_CACHE_MISSES);
+        fd_branches = openCounter(PERF_TYPE_HARDWARE, PERF_COUNT_HW_BRANCH_INSTRUCTIONS);
+        fd_branch_misses = openCounter(PERF_TYPE_HARDWARE, PERF_COUNT_HW_BRANCH_MISSES);
+
+        if (opened_counters == 0) {
+            closeAll();
+            active = false;
+            return false;
+        }
+
+        resetAndEnable();
+        active = true;
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    PerfCounterSample stop()
+    {
+        PerfCounterSample sample;
+#ifdef __linux__
+        if (!active) {
+            return sample;
+        }
+        active = false;
+        disableAll();
+
+        sample.valid = opened_counters > 0;
+        sample.cycles = readCounter(fd_cycles);
+        sample.instructions = readCounter(fd_instructions);
+        sample.cache_misses = readCounter(fd_cache_misses);
+        sample.branches = readCounter(fd_branches);
+        sample.branch_misses = readCounter(fd_branch_misses);
+
+        closeAll();
+#endif
+        return sample;
+    }
+
+private:
+#ifdef __linux__
+    int fd_cycles { -1 };
+    int fd_instructions { -1 };
+    int fd_cache_misses { -1 };
+    int fd_branches { -1 };
+    int fd_branch_misses { -1 };
+    bool active { false };
+    int opened_counters { 0 };
+
+    static long sys_perf_event_open(struct perf_event_attr* attr, pid_t pid, int cpu, int group_fd, unsigned long flags)
+    {
+        return syscall(__NR_perf_event_open, attr, pid, cpu, group_fd, flags);
+    }
+
+    int openCounter(uint32_t type, uint64_t config)
+    {
+        struct perf_event_attr attr {};
+        attr.size = sizeof(perf_event_attr);
+        attr.type = type;
+        attr.config = config;
+        attr.disabled = 1;
+        attr.exclude_kernel = 1;
+        attr.exclude_hv = 1;
+        attr.exclude_idle = 0;
+        attr.read_format = 0;
+
+        int fd = static_cast<int>(sys_perf_event_open(&attr, 0, -1, -1, 0));
+        if (fd != -1) {
+            ++opened_counters;
+        }
+        return fd;
+    }
+
+    void resetAndEnable()
+    {
+        if (fd_cycles != -1) {
+            ioctl(fd_cycles, PERF_EVENT_IOC_RESET, 0);
+            ioctl(fd_cycles, PERF_EVENT_IOC_ENABLE, 0);
+        }
+        if (fd_instructions != -1) {
+            ioctl(fd_instructions, PERF_EVENT_IOC_RESET, 0);
+            ioctl(fd_instructions, PERF_EVENT_IOC_ENABLE, 0);
+        }
+        if (fd_cache_misses != -1) {
+            ioctl(fd_cache_misses, PERF_EVENT_IOC_RESET, 0);
+            ioctl(fd_cache_misses, PERF_EVENT_IOC_ENABLE, 0);
+        }
+        if (fd_branches != -1) {
+            ioctl(fd_branches, PERF_EVENT_IOC_RESET, 0);
+            ioctl(fd_branches, PERF_EVENT_IOC_ENABLE, 0);
+        }
+        if (fd_branch_misses != -1) {
+            ioctl(fd_branch_misses, PERF_EVENT_IOC_RESET, 0);
+            ioctl(fd_branch_misses, PERF_EVENT_IOC_ENABLE, 0);
+        }
+    }
+
+    void disableAll()
+    {
+        if (fd_cycles != -1) {
+            ioctl(fd_cycles, PERF_EVENT_IOC_DISABLE, 0);
+        }
+        if (fd_instructions != -1) {
+            ioctl(fd_instructions, PERF_EVENT_IOC_DISABLE, 0);
+        }
+        if (fd_cache_misses != -1) {
+            ioctl(fd_cache_misses, PERF_EVENT_IOC_DISABLE, 0);
+        }
+        if (fd_branches != -1) {
+            ioctl(fd_branches, PERF_EVENT_IOC_DISABLE, 0);
+        }
+        if (fd_branch_misses != -1) {
+            ioctl(fd_branch_misses, PERF_EVENT_IOC_DISABLE, 0);
+        }
+    }
+
+    void closeAll()
+    {
+        if (fd_cycles != -1) {
+            close(fd_cycles);
+            fd_cycles = -1;
+        }
+        if (fd_instructions != -1) {
+            close(fd_instructions);
+            fd_instructions = -1;
+        }
+        if (fd_cache_misses != -1) {
+            close(fd_cache_misses);
+            fd_cache_misses = -1;
+        }
+        if (fd_branches != -1) {
+            close(fd_branches);
+            fd_branches = -1;
+        }
+        if (fd_branch_misses != -1) {
+            close(fd_branch_misses);
+            fd_branch_misses = -1;
+        }
+        opened_counters = 0;
+    }
+
+    static uint64_t readCounter(int fd)
+    {
+        if (fd == -1) {
+            return 0;
+        }
+        uint64_t value = 0;
+        if (read(fd, &value, sizeof(value)) != static_cast<ssize_t>(sizeof(value))) {
+            value = 0;
+        }
+        return value;
+    }
+#endif
+};
+
 // CPU Affinity utilities for production-grade benchmarking
+
+inline std::string getBuildCompilerInfo()
+{
+#ifdef PERF_BUILD_COMPILER
+    std::string compiler = PERF_BUILD_COMPILER;
+    if (compiler.empty()) {
+        compiler = "unknown";
+    }
+#else
+    std::string compiler = "unknown";
+#endif
+#ifdef PERF_BUILD_COMPILER_VERSION
+    std::string version = PERF_BUILD_COMPILER_VERSION;
+    if (!version.empty()) {
+        compiler += " " + version;
+    }
+#endif
+    return compiler;
+}
+
+inline std::string getBuildTypeInfo()
+{
+#ifdef PERF_BUILD_TYPE
+    std::string build_type = PERF_BUILD_TYPE;
+    if (build_type.empty()) {
+        build_type = "unspecified";
+    }
+#else
+    std::string build_type = "unspecified";
+#endif
+    return build_type;
+}
+
+inline std::string getCMakeVersionInfo()
+{
+#ifdef PERF_CMAKE_VERSION
+    std::string cmake_version = PERF_CMAKE_VERSION;
+    if (cmake_version.empty()) {
+        cmake_version = "unknown";
+    }
+#else
+    std::string cmake_version = "unknown";
+#endif
+    return cmake_version;
+}
+
+inline std::string getBuildMetadataSummary()
+{
+    std::ostringstream oss;
+    oss << "Build Compiler: " << getBuildCompilerInfo() << "\n";
+    oss << "Build Type: " << getBuildTypeInfo() << "\n";
+    oss << "CMake Version: " << getCMakeVersionInfo();
+    return oss.str();
+}
+
+inline std::map<std::string, std::string> getBuildMetadataMap()
+{
+    return {
+        {"build.compiler", getBuildCompilerInfo()},
+        {"build.type", getBuildTypeInfo()},
+        {"build.cmake", getCMakeVersionInfo()}
+    };
+}
+
 class CPUAffinity {
 public:
     // Get the number of available CPU cores

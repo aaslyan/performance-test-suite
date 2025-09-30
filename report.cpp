@@ -76,7 +76,7 @@ std::string Report::toTXT() const
                 << std::left << std::setw(10) << r.p99_latency
                 << " " << std::left << std::setw(19) << r.latency_unit << "|\n";
 
-            if (!r.extra_metrics.empty()) {
+            if (!r.extra_metrics.empty() || !r.extra_info.empty()) {
                 txt << "|" << std::string(54, ' ') << "|\n";
                 txt << "| Additional Metrics:" << std::string(33, ' ') << "|\n";
                 for (const auto& metric : r.extra_metrics) {
@@ -87,6 +87,14 @@ std::string Report::toTXT() const
                     txt << "|   " << std::left << std::setw(15) << name << ": "
                         << std::fixed << std::setprecision(3) << std::left << std::setw(27)
                         << metric.second << "|\n";
+                }
+                for (const auto& info : r.extra_info) {
+                    std::string name = info.first;
+                    if (name.length() > 15) {
+                        name = name.substr(0, 12) + "...";
+                    }
+                    txt << "|   " << std::left << std::setw(15) << name << ": "
+                        << std::left << std::setw(27) << info.second << "|\n";
                 }
             }
         } else {
@@ -159,7 +167,9 @@ std::string Report::toJSON() const
             json << "        \"unit\": \"" << r.latency_unit << "\"\n";
             json << "      }";
 
-            if (!r.extra_metrics.empty()) {
+            bool has_numeric_metrics = !r.extra_metrics.empty();
+            bool has_text_metrics = !r.extra_info.empty();
+            if (has_numeric_metrics) {
                 json << ",\n      \"extra_metrics\": {\n";
                 bool first = true;
                 for (const auto& metric : r.extra_metrics) {
@@ -167,6 +177,17 @@ std::string Report::toJSON() const
                         json << ",\n";
                     json << "        \"" << metric.first << "\": " << metric.second;
                     first = false;
+                }
+                json << "\n      }";
+            }
+            if (has_text_metrics) {
+                json << ",\n      \"extra_info\": {\n";
+                bool first_info = true;
+                for (const auto& info : r.extra_info) {
+                    if (!first_info)
+                        json << ",\n";
+                    json << "        \"" << info.first << "\": \"" << info.second << "\"";
+                    first_info = false;
                 }
                 json << "\n      }";
             }
@@ -220,13 +241,16 @@ std::string Report::toMarkdown() const
             md << "| P99 Latency | " << std::fixed << std::setprecision(3)
                << r.p99_latency << " | " << r.latency_unit << " |\n";
 
-            if (!r.extra_metrics.empty()) {
+            if (!r.extra_metrics.empty() || !r.extra_info.empty()) {
                 md << "\n**Additional Metrics:**\n\n";
                 md << "| Metric | Value |\n";
                 md << "|--------|-------|\n";
                 for (const auto& metric : r.extra_metrics) {
                     md << "| " << metric.first << " | "
                        << std::fixed << std::setprecision(3) << metric.second << " |\n";
+                }
+                for (const auto& info : r.extra_info) {
+                    md << "| " << info.first << " | " << info.second << " |\n";
                 }
             }
         } else {

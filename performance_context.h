@@ -94,7 +94,8 @@ public:
         Benchmark* benchmark, 
         int duration_seconds = 10, 
         int iterations = 5, 
-        bool verbose = false);
+        bool verbose = false,
+        bool collect_perf_counters = true);
     
     // Analysis methods
     ContextualBenchmarkResult analyzeBenchmarkResult(

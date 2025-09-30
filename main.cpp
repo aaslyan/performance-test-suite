@@ -41,6 +41,11 @@ struct Config {
     bool context_mode = false;
     bool system_check = false;
     bool show_platform_info = false;
+
+    // Telemetry & instrumentation
+    std::string telemetry_file;
+    bool dry_run = false;
+    bool enable_perf_counters = true;
 };
 
 void printUsage(const char* program_name)
@@ -116,13 +121,16 @@ Config parseArguments(int argc, char* argv[])
         { "context", no_argument, nullptr, 'x' },
         { "system-check", no_argument, nullptr, 's' },
         { "platform-info", no_argument, nullptr, 'p' },
+        { "telemetry", required_argument, nullptr, 'T' },
+        { "dry-run", no_argument, nullptr, 'D' },
+        { "no-perf", no_argument, nullptr, 'P' },
         { nullptr, 0, nullptr, 0 }
     };
 
     int opt;
     int option_index = 0;
 
-    while ((opt = getopt_long(argc, argv, "m:d:i:r:f:vhcb:n:F:Hw:C:xsp", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "m:d:i:r:f:vhcb:n:F:Hw:C:xspT:DP", long_options, &option_index)) != -1) {
         switch (opt) {
         case 'm':
             config.modules = splitString(optarg, ',');
@@ -246,6 +254,9 @@ int main(int argc, char* argv[])
 {
     Config config = parseArguments(argc, argv);
 
+    int effective_duration = config.dry_run ? std::max(1, std::min(config.duration, 3)) : config.duration;
+    int effective_iterations = config.dry_run ? 1 : config.iterations;
+
     if (config.help) {
         printUsage(argv[0]);
         return 0;
@@ -253,6 +264,7 @@ int main(int argc, char* argv[])
 
     // Handle performance context modes
     PerformanceContextAnalyzer analyzer;
+    const auto build_metadata = getBuildMetadataMap();
     
     if (config.show_platform_info) {
         std::cout << "Platform Information\n";
@@ -333,20 +345,49 @@ int main(int argc, char* argv[])
                                                                                                   : 0;
     }
 
+    SystemMonitor telemetry_monitor;
+    bool telemetry_enabled = !config.telemetry_file.empty();
+    if (telemetry_enabled) {
+        if (config.verbose) {
+            std::cout << "Telemetry capture enabled: writing samples to " << config.telemetry_file << "\n";
+        }
+        telemetry_monitor.startMonitoring();
+    }
+
     std::cout << "Performance Test Suite v1.0\n";
     std::cout << "===========================\n\n";
+
+    if (config.dry_run) {
+        std::cout << "Dry run mode active: duration " << effective_duration
+                  << "s, iterations " << effective_iterations << "\n\n";
+    }
 
     if (config.verbose) {
         std::cout << "Configuration:\n";
         std::cout << "  Modules: ";
         for (const auto& m : config.modules)
-            std::cout << m << " ";
+            std::cout << m << ' ';
         std::cout << "\n";
-        std::cout << "  Duration: " << config.duration << " seconds\n";
-        std::cout << "  Iterations: " << config.iterations << "\n\n";
+        std::cout << "  Duration: " << effective_duration << " seconds";
+        if (config.dry_run && config.duration != effective_duration) {
+            std::cout << " (requested " << config.duration << ")";
+        }
+        std::cout << "\n";
+        std::cout << "  Iterations: " << effective_iterations;
+        if (config.dry_run && config.iterations != effective_iterations) {
+            std::cout << " (requested " << config.iterations << ")";
+        }
+        std::cout << "\n\n";
     }
 
     std::string system_info = getSystemInfo();
+    std::string build_info = getBuildMetadataSummary();
+    if (!build_info.empty()) {
+        if (!system_info.empty() && system_info.back() != '\n') {
+            system_info += '\n';
+        }
+        system_info += build_info;
+    }
     if (config.verbose) {
         std::cout << "System Information:\n"
                   << system_info << "\n";
@@ -359,6 +400,9 @@ int main(int argc, char* argv[])
     auto benchmarks = createBenchmarks(config.modules);
 
     if (benchmarks.empty()) {
+        if (telemetry_enabled) {
+            telemetry_monitor.stopMonitoring();
+        }
         std::cerr << "No valid benchmarks to run\n";
         return 1;
     }
@@ -366,12 +410,12 @@ int main(int argc, char* argv[])
     // Run benchmarks
     if (config.context_mode) {
         std::cout << "Running benchmarks with performance context analysis...\n\n";
-        
+
         // Show system environment first
         if (config.verbose) {
             std::cout << "System Environment Analysis:\n";
             std::cout << analyzer.getPlatformSummary() << "\n";
-            
+
             PerformanceEnvironment env = analyzer.analyzeCurrentEnvironment();
             if (!env.is_optimal_for_benchmarking) {
                 std::cout << "Warning: System environment is not optimal for benchmarking\n";
@@ -382,52 +426,56 @@ int main(int argc, char* argv[])
                 std::cout << "\n";
             }
         }
-        
+
         for (auto& benchmark : benchmarks) {
             std::cout << "Running " << benchmark->getName() << " benchmark with context analysis...\n";
-            
+
             try {
                 ContextualBenchmarkResult contextual_result = analyzer.runBenchmarkWithContext(
-                    benchmark.get(), config.duration, config.iterations, config.verbose);
-                
+                    benchmark.get(), effective_duration, effective_iterations, config.verbose, config.enable_perf_counters);
+
+                for (const auto& entry : build_metadata) {
+                    contextual_result.benchmark_result.extra_info[entry.first] = entry.second;
+                }
+
                 // Add the base result to the report
                 report.addResult(contextual_result.benchmark_result);
-                
+
                 // Show contextual information
                 std::cout << "\nContextual Analysis:\n";
                 std::cout << "  Reliability Score: " << static_cast<int>(contextual_result.reliability_score) << "/100\n";
                 std::cout << "  Status: " << contextual_result.benchmark_result.status << "\n";
-                
+
                 if (contextual_result.benchmark_result.status == "success") {
                     std::cout << "  Result: " << PerformanceContext::interpretThroughputResult(
-                        contextual_result.benchmark_result.throughput, 
+                        contextual_result.benchmark_result.throughput,
                         contextual_result.benchmark_result.throughput_unit) << "\n";
                     std::cout << "  Latency: " << PerformanceContext::interpretLatencyResult(
-                        contextual_result.benchmark_result.avg_latency, 
+                        contextual_result.benchmark_result.avg_latency,
                         contextual_result.benchmark_result.latency_unit) << "\n";
                 }
-                
+
                 std::cout << "  Reliability: " << PerformanceContext::interpretReliabilityScore(
                     contextual_result.reliability_score) << "\n";
-                
+
                 if (contextual_result.interference_report.hasInterference()) {
                     std::cout << "  Interference: " << contextual_result.interference_report.getSummary() << "\n";
                 }
-                
+
                 if (!contextual_result.context_warnings.empty() && config.verbose) {
                     std::cout << "  Warnings:\n";
                     for (const auto& warning : contextual_result.context_warnings) {
                         std::cout << "    - " << warning << "\n";
                     }
                 }
-                
+
                 if (!contextual_result.optimization_suggestions.empty() && config.verbose) {
                     std::cout << "  Suggestions:\n";
                     for (const auto& suggestion : contextual_result.optimization_suggestions) {
                         std::cout << "    - " << suggestion << "\n";
                     }
                 }
-                
+
             } catch (const std::exception& e) {
                 std::cerr << "  Error: " << e.what() << "\n";
                 BenchmarkResult error_result;
@@ -436,7 +484,7 @@ int main(int argc, char* argv[])
                 error_result.error_message = e.what();
                 report.addResult(error_result);
             }
-            
+
             std::cout << std::endl;
         }
     } else {
@@ -445,7 +493,37 @@ int main(int argc, char* argv[])
             std::cout << "Running " << benchmark->getName() << " benchmark...\n";
 
             try {
-                BenchmarkResult result = benchmark->run(config.duration, config.iterations, config.verbose);
+                PerfCounterSet perf_counters;
+                PerfCounterSample perf_sample;
+                bool perf_started = config.enable_perf_counters && perf_counters.start();
+
+                BenchmarkResult result = benchmark->run(effective_duration, effective_iterations, config.verbose);
+
+                if (config.enable_perf_counters) {
+                    perf_sample = perf_counters.stop();
+                    if (perf_sample.valid) {
+                        result.extra_metrics["perf_cpu_cycles"] = static_cast<double>(perf_sample.cycles);
+                        result.extra_metrics["perf_cpu_instructions"] = static_cast<double>(perf_sample.instructions);
+                        result.extra_metrics["perf_l3_cache_misses"] = static_cast<double>(perf_sample.cache_misses);
+                        result.extra_metrics["perf_branches"] = static_cast<double>(perf_sample.branches);
+                        result.extra_metrics["perf_branch_misses"] = static_cast<double>(perf_sample.branch_misses);
+                        if (perf_sample.instructions > 0) {
+                            result.extra_metrics["perf_cpi"] = static_cast<double>(perf_sample.cycles) /
+                                static_cast<double>(perf_sample.instructions);
+                        }
+                        result.extra_info["perf.counters"] = "perf_event_open";
+                    } else {
+                        result.extra_info["perf.counters"] = perf_started ? "unavailable" : "insufficient_permissions";
+                    }
+                } else {
+                    result.extra_info["perf.counters"] = "disabled";
+                    perf_counters.stop();
+                }
+
+                for (const auto& entry : build_metadata) {
+                    result.extra_info[entry.first] = entry.second;
+                }
+
                 report.addResult(result);
 
                 if (config.verbose) {
@@ -470,12 +548,20 @@ int main(int argc, char* argv[])
         }
     }
 
+    if (telemetry_enabled) {
+        telemetry_monitor.stopMonitoring();
+        if (!telemetry_monitor.writeSamplesToFile(config.telemetry_file)) {
+            std::cerr << "Warning: Unable to write telemetry samples to " << config.telemetry_file << std::endl;
+        } else if (config.verbose) {
+            std::cout << "Telemetry written to: " << config.telemetry_file << std::endl;
+        }
+    }
+
     if (config.report_file.empty()) {
         report.printToConsole(config.report_format);
     } else {
         report.writeToFile(config.report_file, config.report_format);
         std::cout << "Report written to: " << config.report_file << std::endl;
     }
-
     return 0;
 }

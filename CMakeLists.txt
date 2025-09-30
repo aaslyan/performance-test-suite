@@ -77,6 +77,12 @@ set(HEADERS
 # Create executable
 add_executable(perf_test ${SOURCES})
 
+target_compile_definitions(perf_test PRIVATE
+    PERF_BUILD_COMPILER="${CMAKE_CXX_COMPILER_ID}"
+    PERF_BUILD_COMPILER_VERSION="${CMAKE_CXX_COMPILER_VERSION}"
+    PERF_CMAKE_VERSION="${CMAKE_VERSION}"
+    PERF_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+)
 # Direct library linking - bypasses ALL CMake pthread detection issues
 # Order matters for static linking: dependencies first, dependents last
 
