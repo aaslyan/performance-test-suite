@@ -1,4 +1,5 @@
 #include "cpu_bench.h"
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <mutex>
@@ -8,6 +9,12 @@ void CPUBenchmark::runSingleThread(int thread_id)
 {
     // Pin thread to specific CPU core for consistent performance
     bool affinity_set = CPUAffinity::pinThreadToCore(thread_id % CPUAffinity::getNumCores());
+    if (!affinity_set) {
+        bool expected = false;
+        if (affinity_warning_emitted.compare_exchange_strong(expected, true)) {
+            std::cerr << "Warning: Unable to pin CPU benchmark threads to dedicated cores. Results may vary." << std::endl;
+        }
+    }
 
     std::mt19937 gen(thread_id);
     std::uniform_real_distribution<> dis(0.0, 1000.0);
@@ -105,10 +112,10 @@ void CPUBenchmark::runInteger()
 void CPUBenchmark::measureCacheLatency(std::vector<double>& latencies)
 {
     const size_t sizes[] = {
-        1024, // 4KB - L1 cache
-        32 * 1024, // 128KB - L2 cache
-        256 * 1024, // 1MB - L3 cache
-        8 * 1024 * 1024 // 32MB - Main memory
+        4 * 1024,        // 4KB - L1 cache
+        128 * 1024,      // 128KB - L2 cache
+        1 * 1024 * 1024, // 1MB - L3 cache
+        32 * 1024 * 1024 // 32MB - Main memory
     };
 
     for (size_t size : sizes) {
@@ -161,6 +168,9 @@ BenchmarkResult CPUBenchmark::run(int duration_seconds, int iterations, bool ver
 
         std::vector<std::thread> threads;
         unsigned int num_threads = std::thread::hardware_concurrency();
+        if (num_threads == 0) {
+            num_threads = static_cast<unsigned int>(std::max(1, CPUAffinity::getNumCores()));
+        }
 
         Timer benchmark_timer;
         benchmark_timer.start();
@@ -203,10 +213,13 @@ BenchmarkResult CPUBenchmark::run(int duration_seconds, int iterations, bool ver
         result.p99_latency = latency_stats.getPercentile(99);
         result.latency_unit = "us/op";
 
-        result.extra_metrics["l1_cache_latency_ns"] = cache_latencies[0];
-        result.extra_metrics["l2_cache_latency_ns"] = cache_latencies[1];
-        result.extra_metrics["l3_cache_latency_ns"] = cache_latencies[2];
-        result.extra_metrics["mem_latency_ns"] = cache_latencies[3];
+        auto cache_metric = [&](size_t idx) {
+            return idx < cache_latencies.size() ? cache_latencies[idx] : 0.0;
+        };
+        result.extra_metrics["l1_cache_latency_ns"] = cache_metric(0);
+        result.extra_metrics["l2_cache_latency_ns"] = cache_metric(1);
+        result.extra_metrics["l3_cache_latency_ns"] = cache_metric(2);
+        result.extra_metrics["mem_latency_ns"] = cache_metric(3);
         result.extra_metrics["threads_used"] = num_threads;
         result.extra_metrics["cpu_cores"] = CPUAffinity::getNumCores();
         result.extra_metrics["cpu_affinity_enabled"] = 1.0;

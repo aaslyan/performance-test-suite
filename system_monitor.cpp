@@ -4,6 +4,8 @@
 #include <iostream>
 #include <numeric>
 #include <sstream>
+#include <cctype>
+#include <utility>
 
 #ifdef __APPLE__
 #include <mach/mach.h>
@@ -165,13 +167,25 @@ bool SystemMonitor::isMonitoring() const
 void SystemMonitor::monitoringLoop()
 {
     const auto sample_interval = std::chrono::milliseconds(250); // 4 samples per second
-    
+
+#ifdef __linux__
+    // Establish baseline readings so subsequent samples use deltas
+    try {
+        (void)collectCurrentMetrics();
+    } catch (const std::exception& e) {
+        std::cerr << "Initial monitoring sample failed: " << e.what() << std::endl;
+    }
+#endif
+
     while (monitoring_active.load()) {
+        std::this_thread::sleep_for(sample_interval);
+        if (!monitoring_active.load()) {
+            break;
+        }
+
         try {
             ResourceMetrics current = collectCurrentMetrics();
             samples.push_back(current);
-            
-            std::this_thread::sleep_for(sample_interval);
         } catch (const std::exception& e) {
             // Continue monitoring even if one sample fails
             std::cerr << "Monitoring sample failed: " << e.what() << std::endl;
@@ -191,39 +205,55 @@ ResourceMetrics SystemMonitor::collectCurrentMetrics()
 #endif
 }
 
+#ifdef __linux__
 ResourceMetrics SystemMonitor::collectLinuxMetrics()
 {
     ResourceMetrics metrics;
-    
+
+    auto now = std::chrono::steady_clock::now();
+    double elapsed_seconds = 0.0;
+    if (has_last_sample_time) {
+        elapsed_seconds = std::chrono::duration<double>(now - last_sample_time).count();
+    }
+    last_sample_time = now;
+    has_last_sample_time = true;
+
     // CPU usage and frequency
     metrics.per_core_usage = getCPUUsagePerCore();
     if (!metrics.per_core_usage.empty()) {
         metrics.avg_cpu_usage_percent = std::accumulate(
-            metrics.per_core_usage.begin(), 
-            metrics.per_core_usage.end(), 
+            metrics.per_core_usage.begin(),
+            metrics.per_core_usage.end(),
             0.0) / metrics.per_core_usage.size();
     }
+    metrics.avg_io_wait_percent = last_io_wait_percent;
     metrics.cpu_frequency_mhz = getCPUFrequency();
     metrics.thermal_throttling_detected = detectThermalThrottling();
-    
+
     // Memory information
     getMemoryInfo(metrics.memory_used_mb, metrics.memory_available_mb);
     if (metrics.memory_available_mb > 0) {
-        metrics.memory_usage_percent = (metrics.memory_used_mb / 
+        metrics.memory_usage_percent = (metrics.memory_used_mb /
             (metrics.memory_used_mb + metrics.memory_available_mb)) * 100.0;
     }
-    
+
     // Disk I/O
-    getDiskIOStats(metrics.disk_read_mbps, metrics.disk_write_mbps, metrics.disk_operations);
-    
+    getDiskIOStats(elapsed_seconds, metrics.disk_read_mbps, metrics.disk_write_mbps, metrics.disk_operations);
+
     // Network stats
-    getNetworkStats(metrics.network_rx_mbps, metrics.network_tx_mbps);
-    
+    getNetworkStats(elapsed_seconds, metrics.network_rx_mbps, metrics.network_tx_mbps);
+
     // System load
     getSystemLoad(metrics.load_average_1min, metrics.load_average_5min, metrics.active_processes);
-    
+
     return metrics;
 }
+#else
+ResourceMetrics SystemMonitor::collectLinuxMetrics()
+{
+    return ResourceMetrics();
+}
+#endif
 
 ResourceMetrics SystemMonitor::collectMacOSMetrics()
 {
@@ -254,55 +284,118 @@ ResourceMetrics SystemMonitor::collectMacOSMetrics()
     return metrics;
 }
 
+#ifdef __linux__
+std::vector<SystemMonitor::CpuTimes> SystemMonitor::readCpuTimes(CpuTimes& total_times)
+{
+    std::vector<CpuTimes> times;
+
+    std::ifstream stat_file("/proc/stat");
+    if (!stat_file.is_open()) {
+        return times;
+    }
+
+    std::string line;
+    while (std::getline(stat_file, line)) {
+        if (line.compare(0, 3, "cpu") != 0) {
+            break;
+        }
+
+        std::istringstream ss(line);
+        std::string label;
+        CpuTimes snapshot;
+
+        if (!(ss >> label)) {
+            continue;
+        }
+
+        ss >> snapshot.user >> snapshot.nice >> snapshot.system >> snapshot.idle;
+        if (!(ss >> snapshot.iowait)) snapshot.iowait = 0;
+        if (!(ss >> snapshot.irq)) snapshot.irq = 0;
+        if (!(ss >> snapshot.softirq)) snapshot.softirq = 0;
+        if (!(ss >> snapshot.steal)) snapshot.steal = 0;
+
+        if (label == "cpu") {
+            total_times = snapshot;
+        } else if (label.rfind("cpu", 0) == 0) {
+            times.push_back(snapshot);
+        }
+    }
+
+    return times;
+}
+#endif
+
 std::vector<double> SystemMonitor::getCPUUsagePerCore()
 {
     std::vector<double> usage;
-    
+
 #ifdef __linux__
-    std::ifstream stat_file("/proc/stat");
-    if (!stat_file.is_open()) {
+    CpuTimes total_times{};
+    auto current_times = readCpuTimes(total_times);
+
+    if (!cpu_times_initialized) {
+        previous_cpu_times = current_times;
+        previous_cpu_total = total_times;
+        cpu_times_initialized = true;
+        last_io_wait_percent = 0.0;
+        usage.assign(current_times.size(), 0.0);
         return usage;
     }
-    
-    std::string line;
-    while (std::getline(stat_file, line)) {
-        if (line.substr(0, 3) == "cpu" && line[3] >= '0' && line[3] <= '9') {
-            std::istringstream ss(line);
-            std::string cpu_name;
-            uint64_t user, nice, system, idle, iowait, irq, softirq, steal;
-            
-            ss >> cpu_name >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal;
-            
-            uint64_t total = user + nice + system + idle + iowait + irq + softirq + steal;
-            uint64_t active = total - idle - iowait;
-            
-            if (total > 0) {
-                usage.push_back((static_cast<double>(active) / total) * 100.0);
-            }
-        }
+
+    if (previous_cpu_times.size() != current_times.size()) {
+        previous_cpu_times = current_times;
+        previous_cpu_total = total_times;
+        last_io_wait_percent = 0.0;
+        usage.assign(current_times.size(), 0.0);
+        return usage;
     }
+
+    usage.reserve(current_times.size());
+    for (size_t i = 0; i < current_times.size(); ++i) {
+        const auto& prev = previous_cpu_times[i];
+        const auto& curr = current_times[i];
+
+        double delta_total = static_cast<double>(curr.total() - prev.total());
+        double delta_active = static_cast<double>(curr.active() - prev.active());
+        double percent = 0.0;
+        if (delta_total > 0.0) {
+            percent = std::clamp((delta_active / delta_total) * 100.0, 0.0, 100.0);
+        }
+        usage.push_back(percent);
+    }
+
+    double delta_total_all = static_cast<double>(total_times.total() - previous_cpu_total.total());
+    double delta_iowait = static_cast<double>(total_times.iowait - previous_cpu_total.iowait);
+    if (delta_total_all > 0.0) {
+        last_io_wait_percent = std::clamp((delta_iowait / delta_total_all) * 100.0, 0.0, 100.0);
+    } else {
+        last_io_wait_percent = 0.0;
+    }
+
+    previous_cpu_times = std::move(current_times);
+    previous_cpu_total = total_times;
 #elif defined(__APPLE__)
     // macOS CPU usage per core is more complex and requires additional frameworks
     // For now, provide overall CPU usage
     mach_port_t host = mach_host_self();
     host_cpu_load_info_data_t cpu_info;
     mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
-    
-    if (host_statistics(host, HOST_CPU_LOAD_INFO, 
+
+    if (host_statistics(host, HOST_CPU_LOAD_INFO,
                        (host_info_t)&cpu_info, &count) == KERN_SUCCESS) {
         uint64_t total = cpu_info.cpu_ticks[CPU_STATE_USER] +
                         cpu_info.cpu_ticks[CPU_STATE_SYSTEM] +
                         cpu_info.cpu_ticks[CPU_STATE_IDLE] +
                         cpu_info.cpu_ticks[CPU_STATE_NICE];
-        
+
         uint64_t active = total - cpu_info.cpu_ticks[CPU_STATE_IDLE];
-        
+
         if (total > 0) {
             usage.push_back((static_cast<double>(active) / total) * 100.0);
         }
     }
 #endif
-    
+
     return usage;
 }
 
@@ -395,83 +488,151 @@ void SystemMonitor::getMemoryInfo(double& used_mb, double& available_mb)
 #endif
 }
 
-void SystemMonitor::getDiskIOStats(double& read_mbps, double& write_mbps, uint64_t& operations)
+void SystemMonitor::getDiskIOStats(double elapsed_seconds, double& read_mbps, double& write_mbps, uint64_t& operations)
 {
     read_mbps = write_mbps = 0.0;
     operations = 0;
-    
+
 #ifdef __linux__
     std::ifstream diskstats("/proc/diskstats");
     if (!diskstats.is_open()) {
         return;
     }
-    
+
+    std::map<std::string, DiskSnapshot> current_stats;
     std::string line;
     while (std::getline(diskstats, line)) {
         std::istringstream ss(line);
+        uint64_t major = 0;
+        uint64_t minor = 0;
         std::string device;
-        uint64_t reads, writes, read_sectors, write_sectors;
-        
-        // Skip first 3 fields (major, minor, device name)
-        for (int i = 0; i < 3; ++i) {
-            ss >> device;
+
+        if (!(ss >> major >> minor >> device)) {
+            continue;
         }
-        
-        // Skip to read/write stats
-        for (int i = 0; i < 3; ++i) {
-            ss >> reads;
+
+        if (device.find("loop") != std::string::npos || device.find("ram") != std::string::npos) {
+            continue;
         }
-        ss >> read_sectors;
-        for (int i = 0; i < 3; ++i) {
-            ss >> writes;
+
+        DiskSnapshot snapshot;
+        uint64_t reads_merged = 0;
+        uint64_t read_time = 0;
+        uint64_t writes_merged = 0;
+        uint64_t write_time = 0;
+
+        if (!(ss >> snapshot.reads_completed >> reads_merged >> snapshot.read_sectors >> read_time >>
+              snapshot.writes_completed >> writes_merged >> snapshot.write_sectors >> write_time)) {
+            continue;
         }
-        ss >> write_sectors;
-        
-        // Sectors are typically 512 bytes
-        read_mbps += (read_sectors * 512.0) / (1024.0 * 1024.0);
-        write_mbps += (write_sectors * 512.0) / (1024.0 * 1024.0);
-        operations += reads + writes;
+
+        current_stats[device] = snapshot;
+
+        if (elapsed_seconds <= 0.0) {
+            continue;
+        }
+
+        auto it = previous_disk_stats.find(device);
+        if (it == previous_disk_stats.end()) {
+            continue;
+        }
+
+        const auto& prev = it->second;
+        uint64_t read_sector_delta = snapshot.read_sectors >= prev.read_sectors
+            ? snapshot.read_sectors - prev.read_sectors
+            : 0;
+        uint64_t write_sector_delta = snapshot.write_sectors >= prev.write_sectors
+            ? snapshot.write_sectors - prev.write_sectors
+            : 0;
+        uint64_t read_delta = snapshot.reads_completed >= prev.reads_completed
+            ? snapshot.reads_completed - prev.reads_completed
+            : 0;
+        uint64_t write_delta = snapshot.writes_completed >= prev.writes_completed
+            ? snapshot.writes_completed - prev.writes_completed
+            : 0;
+
+        double read_mb = (read_sector_delta * 512.0) / (1024.0 * 1024.0);
+        double write_mb = (write_sector_delta * 512.0) / (1024.0 * 1024.0);
+
+        read_mbps += read_mb / elapsed_seconds;
+        write_mbps += write_mb / elapsed_seconds;
+        operations += read_delta + write_delta;
     }
+
+    previous_disk_stats = std::move(current_stats);
+#else
+    (void)elapsed_seconds;
 #endif
 }
 
-void SystemMonitor::getNetworkStats(double& rx_mbps, double& tx_mbps)
+void SystemMonitor::getNetworkStats(double elapsed_seconds, double& rx_mbps, double& tx_mbps)
 {
     rx_mbps = tx_mbps = 0.0;
-    
+
 #ifdef __linux__
     std::ifstream net_dev("/proc/net/dev");
     if (!net_dev.is_open()) {
         return;
     }
-    
+
+    std::map<std::string, NetSnapshot> current_stats;
     std::string line;
     // Skip header lines
     std::getline(net_dev, line);
     std::getline(net_dev, line);
-    
+
     while (std::getline(net_dev, line)) {
         size_t colon = line.find(':');
-        if (colon == std::string::npos) continue;
-        
-        std::string interface = line.substr(0, colon);
-        // Skip loopback interface
-        if (interface.find("lo") != std::string::npos) continue;
-        
-        std::istringstream ss(line.substr(colon + 1));
-        uint64_t rx_bytes, tx_bytes;
-        
-        ss >> rx_bytes;
-        // Skip 7 fields to get to tx_bytes
-        for (int i = 0; i < 7; ++i) {
-            uint64_t dummy;
-            ss >> dummy;
+        if (colon == std::string::npos) {
+            continue;
         }
-        ss >> tx_bytes;
-        
-        rx_mbps += rx_bytes / (1024.0 * 1024.0);
-        tx_mbps += tx_bytes / (1024.0 * 1024.0);
+
+        std::string interface = line.substr(0, colon);
+        interface.erase(std::remove_if(interface.begin(), interface.end(), ::isspace), interface.end());
+        if (interface.empty() || interface == "lo") {
+            continue;
+        }
+
+        std::istringstream ss(line.substr(colon + 1));
+        NetSnapshot snapshot;
+        if (!(ss >> snapshot.rx_bytes)) {
+            continue;
+        }
+        uint64_t dummy = 0;
+        for (int i = 0; i < 7; ++i) {
+            if (!(ss >> dummy)) {
+                break;
+            }
+        }
+        if (!(ss >> snapshot.tx_bytes)) {
+            continue;
+        }
+
+        current_stats[interface] = snapshot;
+
+        if (elapsed_seconds <= 0.0) {
+            continue;
+        }
+
+        auto it = previous_net_stats.find(interface);
+        if (it == previous_net_stats.end()) {
+            continue;
+        }
+
+        const auto& prev = it->second;
+        uint64_t rx_delta = snapshot.rx_bytes >= prev.rx_bytes ? snapshot.rx_bytes - prev.rx_bytes : 0;
+        uint64_t tx_delta = snapshot.tx_bytes >= prev.tx_bytes ? snapshot.tx_bytes - prev.tx_bytes : 0;
+
+        double rx_mb = rx_delta / (1024.0 * 1024.0);
+        double tx_mb = tx_delta / (1024.0 * 1024.0);
+
+        rx_mbps += rx_mb / elapsed_seconds;
+        tx_mbps += tx_mb / elapsed_seconds;
     }
+
+    previous_net_stats = std::move(current_stats);
+#else
+    (void)elapsed_seconds;
 #endif
 }
 
@@ -688,6 +849,15 @@ void SystemMonitor::reset()
 {
     samples.clear();
     accumulated_metrics.reset();
+#ifdef __linux__
+    previous_cpu_times.clear();
+    previous_cpu_total = CpuTimes{};
+    cpu_times_initialized = false;
+    last_io_wait_percent = 0.0;
+    has_last_sample_time = false;
+    previous_disk_stats.clear();
+    previous_net_stats.clear();
+#endif
 }
 
 bool SystemMonitor::isSystemBusy()

@@ -12,6 +12,7 @@ private:
     std::atomic<uint64_t> total_ops { 0 };
     std::atomic<bool> should_stop { false };
     LatencyStats latency_stats;
+    std::atomic<bool> affinity_warning_emitted { false };
 
     void runSingleThread(int thread_id);
     void runFloatingPoint();
